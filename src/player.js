@@ -53,8 +53,25 @@ export class Player {
     this.killStreak    = 0;
     this.nextShotDouble = false;
 
-    // Upgrades (Phase 4)
-    this.upgrades = { damageBonus: 0, reloadBonus: 0, lifesteal: false };
+    // Upgrades
+    this.upgradeLevel = 0;
+    this.passives     = []; // ids of acquired unique passives
+    this.upgrades     = {
+      damageBonus:   0,
+      reloadBonus:   0,
+      speedBonus:    0,
+      lifesteal:     false,
+      vampiricRounds: false,  // +2hp per hit
+      freeShot:      0,       // chance 0-1
+      explosiveRounds: false, // splash on hitscan
+      ricochet:      false,   // hitscan penetrate +1
+      adrenalineRush: false,  // kill → instant reload
+      armorRegen:    false,   // 1 armor / 3s
+      lastStand:     false,   // <25% hp → +40% dmg
+      doubleTap:     false,   // kill → next shot fires twice
+    };
+    this._armorRegenTimer = 0;
+    this._doubleTapReady  = false;
 
     // Stats
     this.totalKills = 0;
@@ -100,6 +117,15 @@ export class Player {
 
   update(dt) {
     if (!this.alive) return;
+
+    // Armor regen passive
+    if (this.upgrades.armorRegen) {
+      this._armorRegenTimer -= dt;
+      if (this._armorRegenTimer <= 0) {
+        this._armorRegenTimer = 3;
+        this.addArmor(1);
+      }
+    }
     this._updateLook();
     this._updateMovement(dt);
     for (const w of this.weapons) w.update(dt);
@@ -180,6 +206,13 @@ export class Player {
       this.onGround = false;
     }
 
+    // Ceiling hard clamp — player head must stay below ceiling (wallHeight - small gap)
+    const ceilY = (this.collision.ceilingY ?? 6) - PLAYER_HEIGHT - 0.05;
+    if (resolved.y > ceilY) {
+      resolved.y      = ceilY;
+      this.velocity.y = Math.min(0, this.velocity.y); // kill upward momentum
+    }
+
     this.position.copy(resolved);
   }
 
@@ -236,15 +269,26 @@ export class Player {
   tryFire(onShot) {
     if (!this.weapon.canFire) return false;
     this.weapon.consume();
+    // Free Shot: chance to refund the ammo just consumed
+    if (this.upgrades.freeShot > 0 && Math.random() < this.upgrades.freeShot) {
+      this.weapon.ammo = Math.min(this.weapon.def.magSize ?? 999, this.weapon.ammo + 1);
+    }
     const dmgMult = this._getFinalDamage();
     this.nextShotDouble = false;
     onShot(this._getAimRay(), dmgMult);
+    // Double Tap: fire second shot without consuming ammo
+    if (this._doubleTapReady) {
+      this._doubleTapReady = false;
+      onShot(this._getAimRay(), dmgMult);
+    }
     return true;
   }
 
   _getFinalDamage() {
     let mult = this.damageMultiplier * (1 + this.upgrades.damageBonus);
+    if (this.weapon._dmgBonus) mult *= (1 + this.weapon._dmgBonus);
     if (this.character.passive.id === 'combat_instinct' && this.nextShotDouble) mult *= 2;
+    if (this.upgrades.lastStand && this.hp / this.maxHp < 0.25) mult *= 1.4;
     return mult;
   }
 
@@ -282,17 +326,86 @@ export class Player {
       this.killStreak++;
       if (this.killStreak >= 3) { this.nextShotDouble = true; this.killStreak = 0; }
     }
-    if (this.upgrades.lifesteal) this.healHp(3);
+    if (this.upgrades.lifesteal)     this.healHp(4);
+    if (this.upgrades.adrenalineRush) {
+      // Instantly complete current reload
+      const w = this.weapon;
+      if (w.reloading) {
+        const needed = w.def.magSize - w.ammo;
+        const take   = Math.min(needed, w.reserve);
+        w.ammo    += take;
+        w.reserve -= take;
+        w.reloading      = false;
+        w.reloadProgress = 0;
+      }
+    }
+    if (this.upgrades.doubleTap) this._doubleTapReady = true;
+  }
+
+  // Called by shooting system on every successful hit
+  onHit() {
+    if (this.upgrades.vampiricRounds) this.healHp(2);
   }
 
   // ── Upgrade (Phase 4) ────────────────────────────────────────────────────────
-  applyUpgrade(id) {
+  // upg: full upgrade object from UpgradeMenu (has .id, ._weaponId, ._statKey, etc.)
+  applyUpgrade(upg) {
+    // Backwards-compat: accept raw id string from old code paths
+    const id = (typeof upg === 'string') ? upg : upg.id;
+    this.upgradeLevel++;
+
+    // ── General upgrades ────────────────────────────────────────────────────
     switch (id) {
-      case 'max_hp':  this.maxHp    += 25; this.healHp(25);  break;
-      case 'armor':   this.maxArmor += 30; this.addArmor(30); break;
-      case 'damage':  this.upgrades.damageBonus  += 0.15; break;
-      case 'reload':  this.upgrades.reloadBonus  += 0.20; break;
-      case 'lifesteal': this.upgrades.lifesteal   = true;  break;
+      case 'max_hp':    this.maxHp    += 30; this.healHp(30);   return;
+      case 'armor':     this.maxArmor += 35; this.addArmor(35); return;
+      case 'damage':    this.upgrades.damageBonus  += 0.20;     return;
+      case 'reload':    this.upgrades.reloadBonus  += 0.25;     return;
+      case 'speed':     this.upgrades.speedBonus   += 0.12;
+                        this.speedMult = this.character.baseStats.moveSpeed *
+                                         (1 + this.upgrades.speedBonus);    return;
+      case 'lifesteal': this.upgrades.lifesteal     = true;     return;
+    }
+
+    // ── Milestone passives ───────────────────────────────────────────────────
+    if (id.startsWith('passive_')) {
+      if (!this.passives.includes(id)) this.passives.push(id);
+      switch (id) {
+        case 'passive_free_shot':         this.upgrades.freeShot       += 0.15; break;
+        case 'passive_explosive_rounds':  this.upgrades.explosiveRounds = true; break;
+        case 'passive_ricochet':          this.upgrades.ricochet        = true; break;
+        case 'passive_vampiric_rounds':   this.upgrades.vampiricRounds  = true; break;
+        case 'passive_adrenaline_rush':   this.upgrades.adrenalineRush  = true; break;
+        case 'passive_armor_regen':       this.upgrades.armorRegen      = true; break;
+        case 'passive_last_stand':        this.upgrades.lastStand       = true; break;
+        case 'passive_double_tap':        this.upgrades.doubleTap       = true; break;
+      }
+      return;
+    }
+
+    // ── Weapon stat upgrades ─────────────────────────────────────────────────
+    if (id.startsWith('weapon_') && upg._weaponId) {
+      const ws = this.weapons.find(w => w.def.id === upg._weaponId);
+      if (!ws) return;
+      switch (upg._statKey) {
+        case 'damage':
+          ws._dmgBonus = (ws._dmgBonus ?? 0) + (upg._pct / 100);
+          break;
+        case 'magSize': {
+          ws.def = { ...ws.def }; // shallow copy so we don't mutate shared def
+          ws.def.magSize   += upg._amt;
+          ws.ammo          += upg._amt; // fill the extra rounds immediately
+          break;
+        }
+        case 'reloadTime':
+          ws.def = { ...ws.def };
+          ws.def.reloadTime = Math.max(0.2, ws.def.reloadTime * (1 - upg._pct / 100));
+          break;
+        case 'reserveAmmo':
+          ws.def = { ...ws.def };
+          ws.def.reserveAmmo += upg._amt;
+          ws.reserve         += upg._amt;
+          break;
+      }
     }
   }
 

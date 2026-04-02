@@ -1,27 +1,69 @@
 // enemies.js — Enemy class + WaveManager
-// Phase 3 Enemy AI extracted here so main.js stays clean.
+// Supports: soldier, rusher, ranged, boss,
+//           molotov, trishot, sniper, tank, guerrilla, drone_gun, drone_bomb
 
 import * as THREE from 'three';
 import { makeEnemyTexture, makeBossTexture } from './utils/PlaceholderTextures.js';
 
+const GRAVITY_E = 22; // matches player gravity
+
 const TEXTURES = {
-  soldier: makeEnemyTexture('soldier'),
-  rusher:  makeEnemyTexture('rusher'),
-  ranged:  makeEnemyTexture('ranged'),
-  boss:    makeBossTexture(),
+  soldier:    makeEnemyTexture('soldier'),
+  rusher:     makeEnemyTexture('rusher'),
+  ranged:     makeEnemyTexture('ranged'),
+  boss:       makeBossTexture(),
+  molotov:    makeEnemyTexture('molotov'),
+  trishot:    makeEnemyTexture('trishot'),
+  sniper:     makeEnemyTexture('sniper'),
+  tank:       makeEnemyTexture('tank'),
+  guerrilla:  makeEnemyTexture('guerrilla'),
+  drone_gun:  makeEnemyTexture('drone_gun'),
+  drone_bomb: makeEnemyTexture('drone_bomb'),
 };
 
 export const ENEMY_DEFS = {
-  soldier: { hp: 80,  speed: 3.5, damage: 10, attackRate: 1.2, attackRange: 1.6,
-             width: 1.0, height: 1.8, hbHalfW: 0.4, score: 100 },
-  rusher:  { hp: 45,  speed: 6.5, damage: 18, attackRate: 0.8, attackRange: 1.4,
-             width: 0.9, height: 1.6, hbHalfW: 0.35, score: 150 },
-  ranged:  { hp: 55,  speed: 2.8, damage: 8,  attackRate: 2.0, attackRange: 18,
-             width: 1.0, height: 1.8, hbHalfW: 0.4, score: 120,
-             projectile: true, preferDist: 10 },
-  boss:    { hp: 500, speed: 3.0, damage: 25, attackRate: 1.0, attackRange: 2.2,
-             width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1000 },
+  // ── Original types ──────────────────────────────────────────────────────────
+  soldier:  { hp: 80,  speed: 3.5, damage: 10, attackRate: 1.2, attackRange: 1.6,
+              width: 1.0, height: 1.8, hbHalfW: 0.4, score: 100 },
+  rusher:   { hp: 45,  speed: 6.5, damage: 18, attackRate: 0.8, attackRange: 1.4,
+              width: 0.9, height: 1.6, hbHalfW: 0.35, score: 150 },
+  ranged:   { hp: 55,  speed: 2.8, damage: 8,  attackRate: 2.0, attackRange: 18,
+              width: 1.0, height: 1.8, hbHalfW: 0.4, score: 120,
+              projectile: true, preferDist: 10 },
+  boss:     { hp: 500, speed: 3.0, damage: 25, attackRate: 1.0, attackRange: 2.2,
+              width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1000 },
+
+  // ── New types ────────────────────────────────────────────────────────────────
+  molotov:   { hp: 70,  speed: 2.5, damage: 8,  attackRate: 4.0, attackRange: 22,
+               width: 1.0, height: 1.8, hbHalfW: 0.4, score: 180,
+               projectile: true, preferDist: 14 },
+
+  trishot:   { hp: 75,  speed: 3.0, damage: 10, attackRate: 2.8, attackRange: 20,
+               width: 1.0, height: 1.8, hbHalfW: 0.4, score: 200,
+               projectile: true, tripleShot: true, preferDist: 10 },
+
+  sniper:    { hp: 60,  speed: 1.8, damage: 45, attackRate: 5.0, attackRange: 35,
+               width: 1.0, height: 1.8, hbHalfW: 0.4, score: 260,
+               sniper: true, preferDist: 20 },
+
+  tank:      { hp: 600, speed: 1.2, damage: 40, attackRate: 3.5, attackRange: 30,
+               width: 2.0, height: 2.2, hbHalfW: 0.7, score: 400,
+               projectile: true, rocketTank: true, preferDist: 16 },
+
+  guerrilla: { hp: 90,  speed: 6.5, damage: 35, attackRate: 3.2, attackRange: 15,
+               width: 1.0, height: 1.8, hbHalfW: 0.4, score: 300,
+               guerrilla: true },
+
+  drone_gun: { hp: 40,  speed: 5.0, damage: 12, attackRate: 0.4, attackRange: 18,
+               width: 0.8, height: 0.8, hbHalfW: 0.35, score: 200,
+               drone: true, droneType: 'gun' },
+
+  drone_bomb:{ hp: 35,  speed: 7.0, damage: 70, attackRate: 99,  attackRange: 1.8,
+               width: 0.8, height: 0.8, hbHalfW: 0.35, score: 220,
+               drone: true, droneType: 'bomb' },
 };
+
+// ── Enemy ────────────────────────────────────────────────────────────────────
 
 export class Enemy {
   constructor(type, x, z, scene, collision) {
@@ -31,7 +73,7 @@ export class Enemy {
     this.maxHp     = this.def.hp;
     this.alive     = true;
     this.scene     = scene;
-    this.collision = collision; // may be null if not provided
+    this.collision = collision;
 
     this.pos      = new THREE.Vector3(x, 0, z);
     this.velocity = new THREE.Vector3();
@@ -42,15 +84,22 @@ export class Enemy {
     this.attackCooldown = Math.random() * this.def.attackRate;
     this._strafeSign    = Math.random() < 0.5 ? 1 : -1;
     this._strafeTimer   = 0;
-    this._steerCooldown = 0; // steering probe cooldown
-    this.onDeath  = null;   // optional fn(pos, type) fired when enemy dies
-    this._kbVelX  = 0;      // knockback velocity
+    this._steerCooldown = 0;
+
+    this.onDeath          = null; // fn(pos, type)
+    this.onSpecialAttack  = null; // fn(enemy, data) — sniper shot, kamikaze
+
+    this._kbVelX  = 0;
     this._kbVelZ  = 0;
-    this._kbTimer = 0;      // seconds remaining on knockback
+    this._kbTimer = 0;
+
+    // Type-specific state
+    this._initTypeState();
 
     // Sprite
     const mat = new THREE.SpriteMaterial({
-      map: TEXTURES[type], transparent: true, alphaTest: 0.1,
+      map: TEXTURES[type] ?? TEXTURES.soldier,
+      transparent: true, alphaTest: 0.1,
     });
     this.sprite = new THREE.Sprite(mat);
     this.sprite.scale.set(this.def.width, this.def.height, 1);
@@ -59,7 +108,7 @@ export class Enemy {
 
     // HP bar
     const bgMat = new THREE.SpriteMaterial({ color: 0x550000 });
-    this._hpBg  = new THREE.Sprite(bgMat);
+    this._hpBg   = new THREE.Sprite(bgMat);
     this._hpBg.scale.set(this.def.width * 0.9, 0.09, 1);
     scene.add(this._hpBg);
 
@@ -70,14 +119,45 @@ export class Enemy {
     this._updateVisuals();
   }
 
-  // Ray vs AABB — used by shooting system
+  _initTypeState() {
+    const d = this.def;
+
+    if (d.sniper) {
+      this._sniperState   = 'idle';
+      this._aimTarget     = null;
+      this._aimTimer      = 0;
+      this._aimBlinkTimer = 0;
+      this._laserLine     = null;
+      this._laserPos      = null;
+    }
+
+    if (d.guerrilla) {
+      this._gState     = 'hunt';
+      this._leapActive = false;
+      this._velY       = 0;
+      this._leapVelX   = 0;
+      this._leapVelZ   = 0;
+    }
+
+    if (d.drone) {
+      this._droneState = 'approach';
+      this._droneTimer = 0;
+      this._velY       = 0;
+      this._orbitAngle = Math.random() * Math.PI * 2;
+      this._floatPhase = Math.random() * Math.PI * 2;
+      this._burstCount = 0;
+      this._burstTimer = 0;
+      this._diveTarget = null;
+      this.pos.y       = 2 + Math.random() * 2; // spawn airborne
+    }
+  }
+
+  // ── Ray vs AABB (used by shooting system) ────────────────────────────────
+
   rayIntersect(origin, dir) {
-    const minX = this.pos.x - this.hbHalfW;
-    const maxX = this.pos.x + this.hbHalfW;
-    const minY = this.pos.y;
-    const maxY = this.pos.y + this.hbH;
-    const minZ = this.pos.z - this.hbHalfW;
-    const maxZ = this.pos.z + this.hbHalfW;
+    const minX = this.pos.x - this.hbHalfW, maxX = this.pos.x + this.hbHalfW;
+    const minY = this.pos.y,                maxY = this.pos.y + this.hbH;
+    const minZ = this.pos.z - this.hbHalfW, maxZ = this.pos.z + this.hbHalfW;
 
     let tmin = -Infinity, tmax = Infinity;
     for (const [o, d, lo, hi] of [
@@ -88,8 +168,7 @@ export class Enemy {
       if (Math.abs(d) < 1e-8) {
         if (o < lo || o > hi) return Infinity;
       } else {
-        const t1 = (lo - o) / d;
-        const t2 = (hi - o) / d;
+        const t1 = (lo - o) / d, t2 = (hi - o) / d;
         tmin = Math.max(tmin, Math.min(t1, t2));
         tmax = Math.min(tmax, Math.max(t1, t2));
       }
@@ -97,6 +176,8 @@ export class Enemy {
     if (tmax < 0 || tmin > tmax) return Infinity;
     return tmin < 0 ? tmax : tmin;
   }
+
+  // ── Main update ──────────────────────────────────────────────────────────
 
   update(dt, playerPos, onAttackPlayer, onFireProjectile, allEnemies, bounds) {
     if (!this.alive) return;
@@ -109,126 +190,361 @@ export class Enemy {
     const nx   = dist > 0.01 ? dx / dist : 0;
     const nz   = dist > 0.01 ? dz / dist : 0;
 
-    if (this.def.projectile) {
-      // Ranged: strafe and keep preferred distance
-      const tooClose = dist < this.def.preferDist - 2;
-      const tooFar   = dist > this.def.preferDist + 2;
+    const d = this.def;
 
-      this._strafeTimer -= dt;
-      if (this._strafeTimer <= 0) {
-        this._strafeSign  = -this._strafeSign;
-        this._strafeTimer = 1.5 + Math.random();
-      }
-
-      const strafeX = -nz * this._strafeSign;
-      const strafeZ =  nx * this._strafeSign;
-
-      if (tooClose) {
-        this.velocity.set(-nx * this.def.speed, 0, -nz * this.def.speed);
-      } else if (tooFar) {
-        this.velocity.set(nx * this.def.speed * 0.7, 0, nz * this.def.speed * 0.7);
-      } else {
-        this.velocity.set(strafeX * this.def.speed * 0.5, 0, strafeZ * this.def.speed * 0.5);
-      }
-
-      // Shoot
-      if (this.attackCooldown <= 0 && dist < this.def.attackRange) {
-        this.attackCooldown = this.def.attackRate;
-        if (onFireProjectile) onFireProjectile(this);
-      }
-
+    // ── Type dispatch ────────────────────────────────────────────────────────
+    if (d.sniper) {
+      this._ticSniper(dt, playerPos, dist, nx, nz);
+    } else if (d.guerrilla) {
+      this._ticGuerrilla(dt, playerPos, dist, nx, nz, onFireProjectile);
+    } else if (d.drone) {
+      this._ticDrone(dt, playerPos, dist, nx, nz, onFireProjectile);
+    } else if (d.projectile) {
+      this._ticRanged(dt, dist, nx, nz, onFireProjectile);
     } else {
-      // Melee: chase
-      this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
-
-      if (dist < this.def.attackRange && this.attackCooldown <= 0) {
-        this.attackCooldown = this.def.attackRate;
-        onAttackPlayer(this.def.damage);
-        // Bounce self away from player so enemies don't stack on the player
-        this.applyKnockback(-nx, -nz, 12);
-      }
+      this._ticMelee(dt, dist, nx, nz, onAttackPlayer);
     }
 
-    // ── Wall steering (Option B) ──────────────────────────────────────────────
-    // Every few frames probe ahead; if blocked, deflect left or right.
-    if (this.collision && this.velocity.lengthSq() > 0.01) {
+    // ── Wall steering (ground only, not leaping) ─────────────────────────────
+    const isFlying = d.drone || this._leapActive;
+    if (!isFlying && this.collision && this.velocity.lengthSq() > 0.01) {
       this._steerCooldown -= dt;
       if (this._steerCooldown <= 0) {
-        this._steerCooldown = 0.12; // probe ~8 times/sec
-
-        const PROBE_DIST = 1.2;
-        const moveDir = new THREE.Vector3(this.velocity.x, 0, this.velocity.z).normalize();
+        this._steerCooldown = 0.12;
+        const PROBE = 1.2;
+        const moveDir    = new THREE.Vector3(this.velocity.x, 0, this.velocity.z).normalize();
         const probeOrigin = new THREE.Vector3(this.pos.x, 0.9, this.pos.z);
-        const frontDist = this.collision.raycast(probeOrigin, moveDir, PROBE_DIST);
-
-        if (frontDist < PROBE_DIST) {
-          // Blocked — probe 45° left and 45° right, pick the clearer side
+        const frontDist  = this.collision.raycast(probeOrigin, moveDir, PROBE);
+        if (frontDist < PROBE) {
           const leftDir  = new THREE.Vector3(-moveDir.z, 0,  moveDir.x);
           const rightDir = new THREE.Vector3( moveDir.z, 0, -moveDir.x);
-          const leftDist  = this.collision.raycast(probeOrigin, leftDir,  PROBE_DIST);
-          const rightDist = this.collision.raycast(probeOrigin, rightDir, PROBE_DIST);
-
-          const blendDir = leftDist >= rightDist ? leftDir : rightDir;
-          // Blend: 50% original + 50% deflection
-          const newDir = moveDir.clone().multiplyScalar(0.3).addScaledVector(blendDir, 0.7).normalize();
-          const speed  = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
-          this.velocity.set(newDir.x * speed, 0, newDir.z * speed);
+          const leftDist  = this.collision.raycast(probeOrigin, leftDir,  PROBE);
+          const rightDist = this.collision.raycast(probeOrigin, rightDir, PROBE);
+          const blendDir  = leftDist >= rightDist ? leftDir : rightDir;
+          const newDir    = moveDir.clone().multiplyScalar(0.3).addScaledVector(blendDir, 0.7).normalize();
+          const spd       = Math.sqrt(this.velocity.x ** 2 + this.velocity.z ** 2);
+          this.velocity.set(newDir.x * spd, 0, newDir.z * spd);
         }
       }
     }
 
-    // ── Integrate ────────────────────────────────────────────────────────────
+    // ── Knockback ────────────────────────────────────────────────────────────
     let kbX = 0, kbZ = 0;
-    if (this._kbTimer > 0) {
-      const frac = this._kbTimer / 0.3; // 1→0 over 0.3s
+    if (this._kbTimer > 0 && !this._leapActive) {
+      const frac = this._kbTimer / 0.3;
       kbX = this._kbVelX * frac * dt;
       kbZ = this._kbVelZ * frac * dt;
       this._kbTimer -= dt;
       if (this._kbTimer < 0) this._kbTimer = 0;
     }
-    const nextX = this.pos.x + this.velocity.x * dt + kbX;
-    const nextZ = this.pos.z + this.velocity.z * dt + kbZ;
 
-    // Per-axis wall slide: try X then Z independently
-    if (this.collision) {
-      const testXZ = this.collision.resolve(
-        new THREE.Vector3(nextX, 0, nextZ), this.hbHalfW, this.hbH
-      );
-      this.pos.x = testXZ.x;
-      this.pos.z = testXZ.z;
-      // Keep y=0 (enemies walk on floor only)
+    // ── Integration ──────────────────────────────────────────────────────────
+    if (this._leapActive) {
+      // Guerrilla leap — gravity, no collision
+      this.pos.x += this._leapVelX * dt;
+      this.pos.z += this._leapVelZ * dt;
+      this._velY -= GRAVITY_E * dt;
+      this.pos.y += this._velY * dt;
+      if (this.pos.y <= 0) {
+        this.pos.y    = 0;
+        this._velY    = 0;
+        this._leapVelX = 0;
+        this._leapVelZ = 0;
+        this._leapActive = false;
+        this._gState  = 'hunt';
+        this.attackCooldown = this.def.attackRate + Math.random();
+      }
+
+    } else if (d.drone) {
+      // Drone — XZ direct, Y handled inside _ticDrone
+      this.pos.x += this.velocity.x * dt;
+      this.pos.z += this.velocity.z * dt;
+
     } else {
-      this.pos.x = nextX;
-      this.pos.z = nextZ;
+      // Ground — AABB-resolved XZ, y clamped to 0
+      const nextX = this.pos.x + this.velocity.x * dt + kbX;
+      const nextZ = this.pos.z + this.velocity.z * dt + kbZ;
+      if (this.collision) {
+        const resolved = this.collision.resolve(
+          new THREE.Vector3(nextX, 0, nextZ), this.hbHalfW, this.hbH,
+        );
+        this.pos.x = resolved.x;
+        this.pos.z = resolved.z;
+      } else {
+        this.pos.x = nextX;
+        this.pos.z = nextZ;
+      }
+      this.pos.y = 0;
     }
 
-    // Bounds clamp (last resort, should rarely trigger now)
-    this.pos.x = Math.max(bounds.minX + this.hbHalfW, Math.min(bounds.maxX - this.hbHalfW, this.pos.x));
-    this.pos.z = Math.max(bounds.minZ + this.hbHalfW, Math.min(bounds.maxZ - this.hbHalfW, this.pos.z));
+    // ── Bounds + separation (ground enemies only) ─────────────────────────────
+    if (!isFlying) {
+      this.pos.x = Math.max(bounds.minX + this.hbHalfW,
+                   Math.min(bounds.maxX - this.hbHalfW, this.pos.x));
+      this.pos.z = Math.max(bounds.minZ + this.hbHalfW,
+                   Math.min(bounds.maxZ - this.hbHalfW, this.pos.z));
 
-    // Separate from other enemies
-    for (const other of allEnemies) {
-      if (other === this || !other.alive) continue;
-      const ex = this.pos.x - other.pos.x;
-      const ez = this.pos.z - other.pos.z;
-      const d2 = ex * ex + ez * ez;
-      const minD = this.hbHalfW + other.hbHalfW + 0.05;
-      if (d2 < minD * minD && d2 > 0.0001) {
-        const d    = Math.sqrt(d2);
-        const push = (minD - d) * 0.5;
-        this.pos.x += (ex / d) * push;
-        this.pos.z += (ez / d) * push;
+      for (const other of allEnemies) {
+        if (other === this || !other.alive || other.def.drone) continue;
+        const ex = this.pos.x - other.pos.x, ez = this.pos.z - other.pos.z;
+        const d2 = ex * ex + ez * ez;
+        const minD = this.hbHalfW + other.hbHalfW + 0.05;
+        if (d2 < minD * minD && d2 > 0.0001) {
+          const d  = Math.sqrt(d2);
+          const push = (minD - d) * 0.5;
+          this.pos.x += (ex / d) * push;
+          this.pos.z += (ez / d) * push;
+        }
       }
     }
 
     this._updateVisuals();
   }
 
+  // ── Behaviour methods ────────────────────────────────────────────────────
+
+  _ticMelee(dt, dist, nx, nz, onAttackPlayer) {
+    this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+    if (dist < this.def.attackRange && this.attackCooldown <= 0) {
+      this.attackCooldown = this.def.attackRate;
+      onAttackPlayer(this.def.damage);
+      this.applyKnockback(-nx, -nz, 12);
+    }
+  }
+
+  _ticRanged(dt, dist, nx, nz, onFireProjectile) {
+    const pref = this.def.preferDist ?? 10;
+    const tooClose = dist < pref - 2, tooFar = dist > pref + 2;
+
+    this._strafeTimer -= dt;
+    if (this._strafeTimer <= 0) {
+      this._strafeSign  = -this._strafeSign;
+      this._strafeTimer = 1.5 + Math.random();
+    }
+    const sx = -nz * this._strafeSign, sz = nx * this._strafeSign;
+
+    if (tooClose) {
+      this.velocity.set(-nx * this.def.speed, 0, -nz * this.def.speed);
+    } else if (tooFar) {
+      this.velocity.set(nx * this.def.speed * 0.7, 0, nz * this.def.speed * 0.7);
+    } else {
+      this.velocity.set(sx * this.def.speed * 0.5, 0, sz * this.def.speed * 0.5);
+    }
+
+    if (this.attackCooldown <= 0 && dist < this.def.attackRange) {
+      this.attackCooldown = this.def.attackRate;
+      if (onFireProjectile) onFireProjectile(this);
+    }
+  }
+
+  _ticSniper(dt, playerPos, dist, nx, nz) {
+    const pref = this.def.preferDist;
+
+    if (this._sniperState === 'idle') {
+      // Slow strafe at preferred distance
+      if (dist > pref + 5) {
+        this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+      } else if (dist < pref - 3) {
+        this.velocity.set(-nx * this.def.speed * 0.5, 0, -nz * this.def.speed * 0.5);
+      } else {
+        this._strafeTimer -= dt;
+        if (this._strafeTimer <= 0) {
+          this._strafeSign  = -this._strafeSign;
+          this._strafeTimer = 2.0 + Math.random();
+        }
+        this.velocity.set(
+          -nz * this._strafeSign * this.def.speed * 0.4, 0,
+           nx * this._strafeSign * this.def.speed * 0.4,
+        );
+      }
+
+      // Begin aiming when ready and in range
+      if (this.attackCooldown <= 0 && dist < this.def.attackRange) {
+        this._sniperState   = 'aiming';
+        this._aimTarget     = playerPos.clone();
+        this._aimTimer      = 1.5;
+        this._aimBlinkTimer = 0;
+        this.velocity.set(0, 0, 0);
+      }
+
+    } else if (this._sniperState === 'aiming') {
+      this.velocity.set(0, 0, 0); // stand still during aim
+
+      this._aimTimer      -= dt;
+      this._aimBlinkTimer -= dt;
+
+      // Lazy-init laser line
+      if (!this._laserLine) {
+        const positions = new Float32Array(6);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.LineBasicMaterial({ color: 0xff4400, transparent: true, opacity: 0.9 });
+        this._laserLine = new THREE.Line(geo, mat);
+        this._laserPos  = positions;
+        this.scene.add(this._laserLine);
+      }
+
+      // Update laser geometry (sniper head → aim target chest height)
+      const headY = this.pos.y + this.hbH * 0.85;
+      this._laserPos[0] = this.pos.x; this._laserPos[1] = headY; this._laserPos[2] = this.pos.z;
+      this._laserPos[3] = this._aimTarget.x;
+      this._laserPos[4] = this._aimTarget.y + 1.0;
+      this._laserPos[5] = this._aimTarget.z;
+      this._laserLine.geometry.attributes.position.needsUpdate = true;
+
+      // Blink
+      if (this._aimBlinkTimer <= 0) {
+        this._aimBlinkTimer = 0.1;
+        this._laserLine.visible = !this._laserLine.visible;
+      }
+
+      // Fire
+      if (this._aimTimer <= 0) {
+        if (this._laserLine) this._laserLine.visible = false;
+        if (this.onSpecialAttack) {
+          this.onSpecialAttack(this, {
+            type:      'sniper_shot',
+            from:      new THREE.Vector3(this.pos.x, this.pos.y + this.hbH * 0.85, this.pos.z),
+            aimTarget: this._aimTarget.clone(),
+          });
+        }
+        this._sniperState = 'idle';
+        this.attackCooldown = this.def.attackRate;
+      }
+    }
+  }
+
+  _ticGuerrilla(dt, playerPos, dist, nx, nz, onFireProjectile) {
+    if (this._leapActive) return; // physics handled in main update()
+
+    if (this._gState === 'hunt') {
+      if (dist > 15) {
+        this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+      } else if (dist < 7) {
+        this.velocity.set(-nx * this.def.speed * 0.7, 0, -nz * this.def.speed * 0.7);
+      } else {
+        this._strafeTimer -= dt;
+        if (this._strafeTimer <= 0) {
+          this._strafeSign  = -this._strafeSign;
+          this._strafeTimer = 1.0 + Math.random();
+        }
+        this.velocity.set(
+          -nz * this._strafeSign * this.def.speed * 0.55, 0,
+           nx * this._strafeSign * this.def.speed * 0.55,
+        );
+      }
+
+      if (this.attackCooldown <= 0 && dist < this.def.attackRange) {
+        this._gState = 'firing';
+        this.velocity.set(0, 0, 0);
+      }
+
+    } else if (this._gState === 'firing') {
+      this.velocity.set(0, 0, 0);
+      this.attackCooldown = this.def.attackRate;
+      if (onFireProjectile) onFireProjectile(this);
+
+      // Begin leap — away from player with random spread
+      this._leapActive = true;
+      this._velY       = 14 + Math.random() * 4;
+      const awayAngle  = Math.atan2(-nz, -nx) + (Math.random() - 0.5) * 1.4;
+      const leapSpd    = 10 + Math.random() * 4;
+      this._leapVelX   = Math.cos(awayAngle) * leapSpd;
+      this._leapVelZ   = Math.sin(awayAngle) * leapSpd;
+      // _gState reset to 'hunt' on landing (see main update)
+    }
+  }
+
+  _ticDrone(dt, playerPos, dist, nx, nz, onFireProjectile) {
+    this._droneTimer -= dt;
+    this._floatPhase += dt * 1.5;
+
+    // Spring Y toward hover height
+    const hoverY = playerPos.y + 3.5 + Math.sin(this._floatPhase) * 0.5;
+    const dyToTarget = hoverY - this.pos.y;
+    this._velY += dyToTarget * 6 * dt;
+    this._velY *= Math.pow(0.8, dt * 60); // damping
+    this.pos.y  = Math.max(1.5, this.pos.y + this._velY * dt);
+
+    if (this._droneState === 'approach') {
+      this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+      if (dist < 8) {
+        this._droneState = 'orbit';
+        this._droneTimer = 1.8 + Math.random();
+      }
+
+    } else if (this._droneState === 'orbit') {
+      // Circle the player
+      this._orbitAngle += dt * 1.2;
+      const oR      = 6;
+      const tX      = playerPos.x + Math.cos(this._orbitAngle) * oR;
+      const tZ      = playerPos.z + Math.sin(this._orbitAngle) * oR;
+      const toTX    = tX - this.pos.x, toTZ = tZ - this.pos.z;
+      const toTLen  = Math.sqrt(toTX * toTX + toTZ * toTZ) || 1;
+      this.velocity.set(
+        (toTX / toTLen) * this.def.speed * 0.7, 0,
+        (toTZ / toTLen) * this.def.speed * 0.7,
+      );
+
+      if (this._droneTimer <= 0) {
+        if (this.def.droneType === 'gun') {
+          this._droneState = 'attack';
+          this._burstCount = 3;
+          this._burstTimer = 0;
+        } else {
+          this._droneState = 'dive';
+          this._diveTarget = playerPos.clone();
+        }
+      }
+
+    } else if (this._droneState === 'attack') {
+      this.velocity.set(0, 0, 0); // hover during burst
+      this._burstTimer -= dt;
+      if (this._burstCount > 0 && this._burstTimer <= 0) {
+        if (onFireProjectile) onFireProjectile(this);
+        this._burstCount--;
+        this._burstTimer = 0.25;
+      }
+      if (this._burstCount <= 0 && this._burstTimer <= 0) {
+        this._droneState = 'retreat';
+        this._droneTimer = 1.2;
+      }
+
+    } else if (this._droneState === 'retreat') {
+      this.velocity.set(-nx * this.def.speed * 0.8, 0, -nz * this.def.speed * 0.8);
+      if (this._droneTimer <= 0) {
+        this._droneState = 'approach';
+      }
+
+    } else if (this._droneState === 'dive') {
+      // Override spring Y — dive toward target
+      const dX = this._diveTarget.x - this.pos.x;
+      const dY = (this._diveTarget.y + 1.0) - this.pos.y;
+      const dZ = this._diveTarget.z - this.pos.z;
+      const dLen = Math.sqrt(dX * dX + dY * dY + dZ * dZ) || 1;
+      const spd = this.def.speed * 2.5;
+      this.velocity.set((dX / dLen) * spd, 0, (dZ / dLen) * spd);
+      this._velY = (dY / dLen) * spd; // override spring
+
+      // Proximity check — trigger kamikaze
+      const toPx = this.pos.x - playerPos.x;
+      const toPy = this.pos.y - (playerPos.y + 1);
+      const toPz = this.pos.z - playerPos.z;
+      if (Math.sqrt(toPx * toPx + toPy * toPy + toPz * toPz) < this.def.attackRange) {
+        if (this.onSpecialAttack) {
+          this.onSpecialAttack(this, { type: 'kamikaze', pos: this.pos.clone() });
+        }
+      }
+    }
+  }
+
+  // ── Damage / Death ───────────────────────────────────────────────────────
+
   takeDamage(amount) {
     this.hp -= amount;
     this._mat.color.setHex(0xff4444);
     clearTimeout(this._flashTimer);
-    this._flashTimer = setTimeout(() => this._mat.color.setHex(0xffffff), 80);
+    this._flashTimer = setTimeout(() => { if (this._mat) this._mat.color.setHex(0xffffff); }, 80);
     if (this.hp <= 0) this.die();
     else this._updateVisuals();
     return this.alive;
@@ -239,6 +555,12 @@ export class Enemy {
     this.scene.remove(this.sprite);
     this.scene.remove(this._hpBg);
     this.scene.remove(this._hpFg);
+    if (this._laserLine) {
+      this.scene.remove(this._laserLine);
+      this._laserLine.geometry.dispose();
+      this._laserLine.material.dispose();
+      this._laserLine = null;
+    }
     this._mat.dispose();
     this._hpBg.material.dispose();
     this._hpFg.material.dispose();
@@ -252,19 +574,19 @@ export class Enemy {
   }
 
   _updateVisuals() {
-    const cy   = this.pos.y + this.hbH / 2;
+    const cy = this.pos.y + this.hbH / 2;
     this.sprite.position.set(this.pos.x, cy, this.pos.z);
 
-    const barY = this.pos.y + this.hbH + 0.2;
-    const pct  = Math.max(0, this.hp / this.maxHp);
-    const barW = this.def.width * 0.9;
+    const barY  = this.pos.y + this.hbH + 0.2;
+    const pct   = Math.max(0, this.hp / this.maxHp);
+    const barW  = this.def.width * 0.9;
     this._hpBg.position.set(this.pos.x, barY, this.pos.z);
     this._hpFg.scale.set(barW * pct, 0.09, 1);
     this._hpFg.position.set(this.pos.x - barW * (1 - pct) / 2, barY, this.pos.z);
   }
 }
 
-// ── WaveManager ───────────────────────────────────────────────────────────────
+// ── WaveManager ──────────────────────────────────────────────────────────────
 
 export class WaveManager {
   constructor(scene, spawnPoints, bounds, collision) {
@@ -277,7 +599,8 @@ export class WaveManager {
     this._queue      = [];
     this._spawnTimer = 0;
     this.SPAWN_INTERVAL = 0.7;
-    this.onEnemyDeath   = null; // fn(pos, type) — set by caller to trigger drops
+    this.onEnemyDeath   = null; // fn(pos, type)
+    this.onSpecialAttack = null; // fn(enemy, data)
   }
 
   startWave() {
@@ -288,22 +611,22 @@ export class WaveManager {
 
   _buildQueue(wave) {
     if (wave % 5 === 0) {
-      // Boss wave
       const q = ['boss'];
-      for (let i = 0; i < wave; i++) q.push('soldier');
+      const escorts = ['soldier','molotov','trishot','ranged','drone_gun','drone_bomb','guerrilla'];
+      for (let i = 0; i < wave; i++) q.push(escorts[i % escorts.length]);
       return q;
     }
+
     const total = 4 + wave * 3;
     const q = [];
     for (let i = 0; i < total; i++) {
-      const r = Math.random();
-      if (wave < 3) {
-        q.push('soldier');
-      } else if (wave < 5) {
-        q.push(r < 0.5 ? 'soldier' : r < 0.8 ? 'rusher' : 'ranged');
-      } else {
-        q.push(r < 0.3 ? 'soldier' : r < 0.6 ? 'rusher' : 'ranged');
-      }
+      let pool;
+      if      (wave < 3)  pool = ['soldier'];
+      else if (wave < 5)  pool = ['soldier','soldier','rusher','molotov','drone_bomb'];
+      else if (wave < 7)  pool = ['soldier','rusher','ranged','molotov','trishot','drone_bomb','sniper','drone_gun'];
+      else if (wave < 10) pool = ['soldier','rusher','ranged','molotov','trishot','drone_bomb','sniper','drone_gun','guerrilla'];
+      else                pool = ['soldier','rusher','ranged','molotov','trishot','drone_bomb','sniper','drone_gun','guerrilla','tank'];
+      q.push(pool[Math.floor(Math.random() * pool.length)]);
     }
     return q;
   }
@@ -317,7 +640,8 @@ export class WaveManager {
         const sp   = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
         const jitter = () => (Math.random() - 0.5) * 4;
         const e = new Enemy(type, sp.x + jitter(), sp.z + jitter(), this.scene, this.collision);
-        if (this.onEnemyDeath) e.onDeath = this.onEnemyDeath;
+        if (this.onEnemyDeath)    e.onDeath         = this.onEnemyDeath;
+        if (this.onSpecialAttack) e.onSpecialAttack = this.onSpecialAttack;
         this.enemies.push(e);
         this._spawnTimer = this.SPAWN_INTERVAL;
       }
@@ -333,10 +657,7 @@ export class WaveManager {
     this.enemies = alive;
   }
 
-  get allDead() {
-    return this._queue.length === 0 && this.enemies.length === 0;
-  }
-
+  get allDead()    { return this._queue.length === 0 && this.enemies.length === 0; }
   get aliveCount() { return this.enemies.length; }
 
   dispose() {

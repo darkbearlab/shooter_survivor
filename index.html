@@ -16,6 +16,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
     #canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+    /* #viewmodel-canvas { disabled } */
 
     /* Overlay screens */
     .screen {
@@ -81,6 +82,41 @@
       text-transform: uppercase;
     }
     #start-btn:hover { background: #ff8833; }
+
+    /* Map Select */
+    #map-cards {
+      display: flex; gap: 32px; margin-bottom: 40px;
+    }
+    .map-card {
+      width: 210px;
+      border: 2px solid #444;
+      padding: 28px 20px 20px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      background: rgba(255,255,255,0.03);
+    }
+    .map-card:hover  { border-color: #ff6600; background: rgba(255,102,0,0.08); }
+    .map-card.selected { border-color: #ff6600; background: rgba(255,102,0,0.18); }
+    .map-card-icon { font-size: 40px; margin-bottom: 12px; color: #ff9944; }
+    .map-card-name { font-size: 15px; color: #ff9944; letter-spacing: 2px; margin-bottom: 10px; }
+    .map-card-desc { font-size: 11px; color: #888; line-height: 1.6; }
+    .map-card-file { margin-top: 12px; font-size: 10px; color: #556; border-top: 1px solid #333; padding-top: 8px; word-break: break-all; }
+    .map-card.has-file .map-card-file { color: #66cc88; }
+    #map-select-btns { display: flex; gap: 16px; }
+    #map-select-btns button {
+      padding: 12px 28px;
+      background: #222;
+      color: #ccc;
+      border: 1px solid #444;
+      font-size: 14px;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 2px;
+      cursor: pointer;
+    }
+    #map-select-btns button:hover { background: #333; color: #fff; }
+    #map-start-btn { background: #ff6600 !important; color: #000 !important; border-color: #ff6600 !important; font-weight: bold; }
+    #map-start-btn:hover { background: #ff8833 !important; }
 
     /* HUD */
     #hud {
@@ -187,12 +223,12 @@
     #upgrade-menu {
       z-index: 200;
     }
-    #upgrade-menu h2 { font-size: 16px; color: #aaa; margin-bottom: 32px; letter-spacing: 4px; }
+    #upgrade-menu-title { font-size: 20px; color: #ff9944; margin-bottom: 32px; letter-spacing: 4px; }
     .upgrade-cards {
       display: flex; gap: 24px;
     }
     .upgrade-card {
-      width: 160px;
+      width: 175px;
       border: 2px solid #444;
       padding: 20px 16px;
       cursor: pointer;
@@ -201,9 +237,12 @@
       background: rgba(255,255,255,0.03);
     }
     .upgrade-card:hover { border-color: #ff9944; background: rgba(255,153,68,0.1); }
+    .upgrade-card.milestone { border-color: #bb8800; background: rgba(255,221,0,0.06); }
+    .upgrade-card.milestone:hover { border-color: #ffdd44; background: rgba(255,221,0,0.15); }
     .upgrade-card .upgrade-icon { font-size: 32px; margin-bottom: 10px; }
     .upgrade-card h3 { font-size: 14px; color: #e8d090; margin-bottom: 6px; }
     .upgrade-card p { font-size: 11px; color: #999; line-height: 1.5; }
+    .upgrade-weapon-tag { margin-top: 8px; font-size: 10px; color: #88ccff; letter-spacing: 2px; border-top: 1px solid #333; padding-top: 6px; }
 
     /* Game Over */
     #game-over h1 { color: #ff3333; }
@@ -605,10 +644,33 @@
   <button id="start-btn">DEPLOY</button>
 </div>
 
+<!-- Map Select Screen -->
+<div id="map-select" class="screen hidden">
+  <h1>SHOOTER SURVIVOR</h1>
+  <h2>SELECT MAP</h2>
+  <div id="map-cards">
+    <div class="map-card" id="map-card-default">
+      <div class="map-card-icon">■</div>
+      <div class="map-card-name">DEFAULT ARENA</div>
+      <div class="map-card-desc">Standard 60×60 arena.<br>Four resource nodes at corners.</div>
+    </div>
+    <div class="map-card" id="map-card-custom">
+      <div class="map-card-icon">⊞</div>
+      <div class="map-card-name">CUSTOM MAP</div>
+      <div class="map-card-desc" id="map-card-custom-desc">Load a map JSON file<br>from the map editor.</div>
+      <div class="map-card-file" id="map-card-file-hint">No file loaded</div>
+    </div>
+  </div>
+  <div id="map-select-btns">
+    <button id="map-back-btn">◀ BACK</button>
+    <button id="map-load-btn">LOAD FILE</button>
+    <button id="map-start-btn">DEPLOY</button>
+  </div>
+</div>
+
 <!-- Upgrade Menu -->
 <div id="upgrade-menu" class="screen hidden">
-  <h1>LEVEL UP</h1>
-  <h2>CHOOSE AN UPGRADE</h2>
+  <h2 id="upgrade-menu-title">LEVEL UP — CHOOSE AN UPGRADE</h2>
   <div class="upgrade-cards" id="upgrade-cards-container"></div>
 </div>
 
@@ -686,6 +748,7 @@
 "></pre>
 
 <canvas id="canvas"></canvas>
+<!-- <canvas id="viewmodel-canvas" width="640" height="360"></canvas> -->
 
 <script type="module" src="src/main.js"></script>
 </body>

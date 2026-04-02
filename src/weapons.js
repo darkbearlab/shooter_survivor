@@ -52,6 +52,7 @@ export const WEAPON_DEFS = {
     damage: 80,
     splashRadius: 4,
     splashDamage: 60,
+    splashPush: 18,       // impulse applied to anything in splash radius
     speed: 14,
     fireRate: 1.2,
     reloadTime: 2.0,

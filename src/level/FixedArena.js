@@ -12,6 +12,7 @@ export class FixedArena extends IMapBuilder {
     this._colliders   = [];
     this._spawnPoints = [];
     this._group       = new THREE.Group();
+    this.wallHeight   = WALL_H;
   }
 
   build() {

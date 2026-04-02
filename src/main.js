@@ -9,16 +9,21 @@ import { ProjectileSystem }  from './systems/ProjectileSystem.js';
 import { DropSystem }        from './systems/DropSystem.js';
 import { GrenadeSystem }     from './systems/GrenadeSystem.js';
 import { ResourceNodes }     from './systems/ResourceNodes.js';
+import { FireZoneSystem }    from './systems/FireZoneSystem.js';
 import { SaveSystem }        from './systems/SaveSystem.js';
 import { WEAPON_DEFS }       from './weapons.js';
 import { FixedArena }        from './level/FixedArena.js';
+import { JsonMapBuilder }    from './level/JsonMapBuilder.js';
 import { getCharacter, CHARACTERS } from './characters.js';
 import { WaveManager, ENEMY_DEFS } from './enemies.js';
+import { DROP_SETTINGS }           from './dropSettings.js';
 import { UpgradeMenu }       from './ui/UpgradeMenu.js';
 import { HUD }               from './ui/HUD.js';
 import { CharacterSelect }   from './ui/CharacterSelect.js';
 import { BalanceMenu }       from './ui/BalanceMenu.js';
 import { DebugMenu }         from './ui/DebugMenu.js';
+import { MapSelect }         from './ui/MapSelect.js';
+// import { WeaponViewModel }   from './ui/WeaponViewModel.js'; // disabled
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 
@@ -41,17 +46,19 @@ window.addEventListener('resize', () => {
 
 // ── Game globals (set in startGame) ──────────────────────────────────────────
 
-let player       = null;
-let waveManager  = null;
-let projSystem   = null;
+let player         = null;
+let waveManager    = null;
+let projSystem     = null;
 let dropSystem     = null;
 let grenadeSystem  = null;
 let resourceNodes  = null;
+let fireZoneSystem = null;
 let collision      = null;
 let hud          = null;
 let upgradeMenu  = null;
 let balanceMenu  = null;
 let debugMenu    = null;
+// let viewmodel    = null; // disabled
 let gameState    = 'title'; // 'title' | 'char_select' | 'playing' | 'upgrading' | 'between_waves' | 'dead'
 let paused       = false;
 let waveCheckCooldown = 0;
@@ -222,6 +229,23 @@ function updateRailBeams(dt) {
   }
 }
 
+// Orange-red tracer for sniper shots (reuses _railBeams fade system)
+function spawnSniperBeam(from, to) {
+  const positions = new Float32Array([from.x, from.y, from.z, to.x, to.y, to.z]);
+  const geo  = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat  = new THREE.LineBasicMaterial({ color: 0xff4400, transparent: true, opacity: 1.0 });
+  const line = new THREE.Line(geo, mat);
+  scene.add(line);
+  _railBeams.push({ line, life: 0.5 });
+
+  const mat2  = new THREE.LineBasicMaterial({ color: 0xffaa55, transparent: true, opacity: 0.55 });
+  const geo2  = geo.clone();
+  const line2 = new THREE.Line(geo2, mat2);
+  scene.add(line2);
+  _railBeams.push({ line: line2, life: 0.18 });
+}
+
 // ── Shooting ──────────────────────────────────────────────────────────────────
 
 function handleShooting() {
@@ -230,6 +254,7 @@ function handleShooting() {
   player.tryFire(({ origin, direction }, dmgMult) => {
     const def = player.weapon.def;
     showMuzzleFlash(def.id === 'railgun' ? 0x44eeff : undefined);
+    // if (viewmodel) viewmodel.onFire(); // disabled
 
     if (def.type === 'melee') {
       // Instant short-range attack — ray vs each enemy AABB, closest within range
@@ -244,6 +269,7 @@ function handleShooting() {
           if (wallDist >= d) {
             const survived = e.takeDamage(def.damage * dmgMult);
             if (!survived) { player.onKill(); hud.showKill(e.type); }
+            player.onHit();
             // Knockback the hit enemy away from player
             const dx = e.pos.x - player.position.x;
             const dz = e.pos.z - player.position.z;
@@ -275,6 +301,7 @@ function handleShooting() {
       for (const { e } of hits) {
         const survived = e.takeDamage(def.damage * dmgMult);
         if (!survived) { player.onKill(); hud.showKill(e.type); }
+        player.onHit();
         hitAny = true;
       }
 
@@ -307,7 +334,39 @@ function handleShooting() {
           if (wallDist >= closestDist) {
             const survived = closestEnemy.takeDamage(def.damage * dmgMult);
             hitEnemy = true;
+            player.onHit();
             if (!survived) { player.onKill(); hud.showKill(closestEnemy.type); }
+
+            // Explosive Rounds: small AoE around hit point
+            if (player.upgrades.explosiveRounds) {
+              const hitPos = origin.clone().addScaledVector(dir, closestDist);
+              const splashR = 1.5;
+              const splashDmg = def.damage * dmgMult * 0.20;
+              for (const e of waveManager.enemies) {
+                if (!e.alive || e === closestEnemy) continue;
+                const d = hitPos.distanceTo(new THREE.Vector3(e.pos.x, e.pos.y + e.hbH * 0.5, e.pos.z));
+                if (d < splashR) {
+                  const sv = e.takeDamage(splashDmg * (1 - d / splashR));
+                  if (!sv) { player.onKill(); hud.showKill(e.type); }
+                }
+              }
+            }
+
+            // Ricochet: also hit the second-closest enemy
+            if (player.upgrades.ricochet) {
+              let secondDist  = def.range ?? 100;
+              let secondEnemy = null;
+              for (const e of waveManager.enemies) {
+                if (!e.alive || e === closestEnemy) continue;
+                const d = e.rayIntersect(origin, dir);
+                if (d < secondDist) { secondDist = d; secondEnemy = e; }
+              }
+              if (secondEnemy && collision.raycast(origin, dir, secondDist) >= secondDist) {
+                const sv = secondEnemy.takeDamage(def.damage * dmgMult);
+                player.onHit();
+                if (!sv) { player.onKill(); hud.showKill(secondEnemy.type); }
+              }
+            }
           }
         }
       }
@@ -333,6 +392,7 @@ function handleShooting() {
         damage:       def.damage        * dmgMult,
         splashRadius: def.splashRadius  ?? 0,
         splashDamage: (def.splashDamage ?? 0) * dmgMult,
+        splashPush:   def.splashPush    ?? 0,
         color:        def.projectileColor  ?? '#ff8800',
         scaleX:       def.projectileScaleX ?? 0.35,
         scaleY:       def.projectileScaleY ?? 0.35,
@@ -340,8 +400,10 @@ function handleShooting() {
       };
 
       if ((def.splashRadius ?? 0) > 0) {
-        // Splash weapon (rocket, etc.) — area damage + self damage
+        // Splash weapon (rocket, etc.) — area damage + push + self damage
         spawnCfg.onSplash = (pos, radius, splashDmg) => {
+          const push = spawnCfg.splashPush ?? 0;
+
           for (const e of waveManager.enemies) {
             if (!e.alive) continue;
             const centre = new THREE.Vector3(e.pos.x, e.pos.y + e.hbH * 0.5, e.pos.z);
@@ -350,14 +412,37 @@ function handleShooting() {
               const falloff  = 1 - d / radius;
               const survived = e.takeDamage(splashDmg * falloff);
               if (!survived) { player.onKill(); hud.showKill(e.type); }
+              player.onHit();
               hud.flashHit();
+              // Knock enemy away from blast
+              if (push > 0 && d > 0.01) {
+                const nx = (e.pos.x - pos.x) / d;
+                const nz = (e.pos.z - pos.z) / d;
+                e.applyKnockback(nx, nz, push * falloff);
+              }
             }
           }
+
+          // ── Player rocket jump ──
           const selfDist = pos.distanceTo(camera.position);
-          const SELF_DMG_MIN_DIST = 2.5;
-          if (selfDist >= SELF_DMG_MIN_DIST && selfDist < radius) {
-            player.takeDamage(splashDmg * (1 - selfDist / radius) * 0.4);
-            hud.flashDamage();
+          if (selfDist < radius) {
+            const falloff = 1 - selfDist / radius;
+            // Self-damage (skipped if very close to avoid instakill on own feet)
+            const SELF_DMG_MIN_DIST = 2.5;
+            if (selfDist >= SELF_DMG_MIN_DIST) {
+              player.takeDamage(splashDmg * falloff * 0.4);
+              hud.flashDamage();
+            }
+            // Push — direction away from explosion, always with upward bias
+            if (push > 0) {
+              const pushDir = camera.position.clone().sub(pos);
+              if (pushDir.lengthSq() < 0.0001) pushDir.set(0, 1, 0);
+              pushDir.normalize();
+              pushDir.y = Math.max(pushDir.y, 0.35); // guarantee lift
+              pushDir.normalize();
+              player.velocity.addScaledVector(pushDir, push * falloff);
+              player.onGround = false;
+            }
           }
         };
       } else {
@@ -366,6 +451,7 @@ function handleShooting() {
           if (hitEnemy) {
             const survived = hitEnemy.takeDamage(def.damage * dmgMult);
             if (!survived) { player.onKill(); hud.showKill(hitEnemy.type); }
+            player.onHit();
             hud.flashHit();
           }
         };
@@ -471,17 +557,21 @@ function handlePickupInteract() {
 // ── Drop spawning on enemy death ──────────────────────────────────────────────
 
 const AMMO_AMOUNTS = { shotgun: 16, rocket: 4, railgun: 8 };
-const DROP_CHANCE  = { soldier: 0.35, rusher: 0.25, ranged: 0.40, boss: 1.0 };
+const DROP_CHANCE  = {
+  soldier: 0.35, rusher: 0.25, ranged: 0.40, boss: 1.0,
+  molotov: 0.35, trishot: 0.35, sniper: 0.50, tank: 0.85,
+  guerrilla: 0.50, drone_gun: 0.30, drone_bomb: 0.20,
+};
 
 function onEnemyDeath(pos, enemyType) {
   const isBoss    = enemyType === 'boss';
-  const dropCount = isBoss ? 3 : (Math.random() < (DROP_CHANCE[enemyType] ?? 0.3) ? 1 : 0);
+  const chance    = DROP_CHANCE[enemyType] ?? 0.3;
+  const dropCount = isBoss ? 3 : (Math.random() < chance * (DROP_SETTINGS.enemyDropChance / 0.45) ? 1 : 0);
   if (!dropCount) return;
 
   const weaponIds = player.weapons.map(w => w.def.id);
 
   for (let i = 0; i < dropCount; i++) {
-    // Spread boss drops in a ring; single drops land at exact position
     const angle    = (i / Math.max(1, dropCount)) * Math.PI * 2;
     const spread   = dropCount > 1 ? 1.2 : 0;
     const spawnPos = pos.clone().add(new THREE.Vector3(
@@ -489,13 +579,17 @@ function onEnemyDeath(pos, enemyType) {
     ));
 
     const r = Math.random();
-    if (r < 0.25) {
-      dropSystem.spawn(spawnPos, { type: 'health', amount: 20 });
-    } else if (r < 0.45) {
-      dropSystem.spawn(spawnPos, { type: 'armor', amount: 15 });
-    } else {
+    const ammoThresh = DROP_SETTINGS.ammoDropWeight;          // e.g. 0.55
+    const hpThresh   = ammoThresh + (1 - ammoThresh) * 0.55; // split remainder hp/armor
+    if (r < ammoThresh) {
       const weaponId = weaponIds[Math.floor(Math.random() * weaponIds.length)];
-      dropSystem.spawn(spawnPos, { type: 'ammo', weaponId, amount: AMMO_AMOUNTS[weaponId] ?? 12 });
+      const base = AMMO_AMOUNTS[weaponId] ?? 12;
+      dropSystem.spawn(spawnPos, { type: 'ammo', weaponId,
+        amount: Math.round(base * DROP_SETTINGS.ammoMultiplier) });
+    } else if (r < hpThresh) {
+      dropSystem.spawn(spawnPos, { type: 'health', amount: 20 });
+    } else {
+      dropSystem.spawn(spawnPos, { type: 'armor', amount: 15 });
     }
   }
 }
@@ -503,22 +597,152 @@ function onEnemyDeath(pos, enemyType) {
 // ── Enemy ranged projectile callback ─────────────────────────────────────────
 
 function onEnemyFireProjectile(enemy) {
-  const toPlayer = player.position.clone().sub(enemy.pos).normalize();
-  // Slight upward angle so projectile arcs toward player's centre of mass
-  toPlayer.y += 0.05;
+  const origin = new THREE.Vector3(enemy.pos.x, enemy.pos.y + enemy.hbH * 0.6, enemy.pos.z);
+  const toPlayer = new THREE.Vector3(
+    player.position.x - enemy.pos.x,
+    player.position.y + 0.9 - origin.y,
+    player.position.z - enemy.pos.z,
+  ).normalize();
 
+  // ── Molotov: arc bomb that creates a fire zone on impact ──────────────────
+  if (enemy.type === 'molotov') {
+    const groundTarget = new THREE.Vector3(player.position.x, 0, player.position.z);
+    const dir = groundTarget.clone().sub(origin).normalize();
+    projSystem.spawn({
+      owner: 'enemy', origin, direction: dir,
+      speed: 9, damage: 0, splashRadius: 0,
+      color: '#ff8800', scaleX: 0.4, scaleY: 0.4, minTravel: 0.5,
+      onHit: (hitPos) => {
+        if (fireZoneSystem) {
+          fireZoneSystem.spawn(new THREE.Vector3(hitPos.x, 0, hitPos.z), 3, enemy.def.damage, 6);
+        }
+      },
+    });
+    return;
+  }
+
+  // ── Trishot: 3-way spread ─────────────────────────────────────────────────
+  if (enemy.type === 'trishot') {
+    const SPREAD = 0.15;
+    for (let i = -1; i <= 1; i++) {
+      // Perpendicular to toPlayer (in XZ plane)
+      const perp = new THREE.Vector3(-toPlayer.z, 0, toPlayer.x).normalize();
+      const dir  = toPlayer.clone().addScaledVector(perp, i * SPREAD).normalize();
+      projSystem.spawn({
+        owner: 'enemy', origin: origin.clone(), direction: dir,
+        speed: 11, damage: enemy.def.damage, splashRadius: 0,
+        color: '#dd44ff', minTravel: 0.6,
+      });
+    }
+    return;
+  }
+
+  // ── Tank / Guerrilla: enemy rocket with splash push ───────────────────────
+  if (enemy.type === 'tank' || enemy.type === 'guerrilla') {
+    const splashRadius = 4.5, splashDamage = enemy.def.damage, push = 15;
+    projSystem.spawn({
+      owner: 'enemy', origin, direction: toPlayer,
+      speed: 10, damage: enemy.def.damage,
+      splashRadius, splashDamage, splashPush: push,
+      color: '#ff6600', scaleX: 0.45, scaleY: 0.45, minTravel: 0.8,
+      onSplash: (pos, radius, splashDmg) => {
+        const d = pos.distanceTo(camera.position);
+        if (d < radius) {
+          const falloff = 1 - d / radius;
+          projSystem._pendingPlayerHits.push(splashDmg * falloff);
+          hud.flashDamage();
+          const pushDir = camera.position.clone().sub(pos);
+          if (pushDir.lengthSq() < 0.001) pushDir.set(0, 1, 0);
+          pushDir.normalize();
+          pushDir.y = Math.max(pushDir.y, 0.3);
+          pushDir.normalize();
+          player.velocity.addScaledVector(pushDir, push * falloff);
+          player.onGround = false;
+        }
+      },
+    });
+    return;
+  }
+
+  // ── Drone gun: aimed burst shot from above ────────────────────────────────
+  if (enemy.type === 'drone_gun') {
+    projSystem.spawn({
+      owner: 'enemy', origin, direction: toPlayer,
+      speed: 15, damage: enemy.def.damage, splashRadius: 0,
+      color: '#44aaff', minTravel: 0.4,
+    });
+    return;
+  }
+
+  // ── Default: standard ranged shot ────────────────────────────────────────
   projSystem.spawn({
-    owner:        'enemy',
-    origin:       new THREE.Vector3(enemy.pos.x, enemy.pos.y + enemy.hbH * 0.6, enemy.pos.z),
-    direction:    toPlayer,
-    speed:        11,
-    damage:       enemy.def.damage,
-    splashRadius: 0,
-    splashDamage: 0,
-    color:        '#ff2200',
-    onSplash:     null,
-    minTravel:    0.6, // just enough to clear the enemy's own hitbox
+    owner: 'enemy', origin, direction: toPlayer,
+    speed: 11, damage: enemy.def.damage, splashRadius: 0,
+    color: '#ff2200', minTravel: 0.6,
   });
+}
+
+// ── Enemy special-attack callback (sniper hitscan, kamikaze explosion) ────────
+
+function onEnemySpecialAttack(enemy, data) {
+  if (data.type === 'sniper_shot') {
+    const { from, aimTarget } = data;
+    const dir = aimTarget.clone().sub(from).normalize();
+
+    // Wall distance along shot ray
+    const wallDist = collision.raycast(from, dir, 200);
+
+    // Ray vs player AABB
+    const R = 0.5, H = 1.7;
+    const pp = player.position;
+    let tmin = -Infinity, tmax = Infinity;
+    let blocked = false;
+    for (const [o, d, lo, hi] of [
+      [from.x, dir.x, pp.x - R, pp.x + R],
+      [from.y, dir.y, pp.y,     pp.y + H],
+      [from.z, dir.z, pp.z - R, pp.z + R],
+    ]) {
+      if (Math.abs(d) < 1e-8) {
+        if (o < lo || o > hi) { blocked = true; break; }
+      } else {
+        const t1 = (lo - o) / d, t2 = (hi - o) / d;
+        tmin = Math.max(tmin, Math.min(t1, t2));
+        tmax = Math.min(tmax, Math.max(t1, t2));
+      }
+    }
+    if (!blocked && tmax >= 0 && tmin <= tmax) {
+      const hitDist = tmin < 0 ? tmax : tmin;
+      if (hitDist < wallDist) {
+        player.takeDamage(enemy.def.damage);
+        hud.flashDamage();
+      }
+    }
+
+    // Tracer beam regardless of hit
+    const beamEnd = from.clone().addScaledVector(dir, Math.min(wallDist, 150));
+    spawnSniperBeam(from, beamEnd);
+  }
+
+  else if (data.type === 'kamikaze') {
+    const pos    = data.pos;
+    const radius = 4, damage = enemy.def.damage;
+    const d = pos.distanceTo(camera.position);
+    if (d < radius) {
+      const falloff = 1 - d / radius;
+      projSystem._pendingPlayerHits.push(damage * falloff);
+      hud.flashDamage();
+      const pushDir = camera.position.clone().sub(pos);
+      if (pushDir.lengthSq() < 0.001) pushDir.set(0, 1, 0);
+      pushDir.normalize();
+      pushDir.y = Math.max(pushDir.y, 0.3);
+      pushDir.normalize();
+      player.velocity.addScaledVector(pushDir, 16 * falloff);
+      player.onGround = false;
+    }
+    // Visual explosion and remove drone
+    projSystem._explode(pos, '#ff3300');
+    enemy.die();
+  }
 }
 
 // ── Wave Progression ──────────────────────────────────────────────────────────
@@ -533,8 +757,22 @@ function checkWaveEnd() {
   document.exitPointerLock();
 
   setTimeout(() => {
-    upgradeMenu.show(upgradeId => {
-      player.applyUpgrade(upgradeId);
+    const playerState = {
+      upgradeLevel: player.upgradeLevel + 1,
+      passives: player.passives,
+      weapons: player.weapons.map(w => ({
+        id:          w.def.id,
+        name:        w.def.name,
+        shortName:   w.def.shortName ?? w.def.name,
+        type:        w.def.type,
+        magSize:     w.def.magSize     ?? 0,
+        damage:      w.def.damage,
+        reloadTime:  w.def.reloadTime,
+        reserveAmmo: w.def.reserveAmmo ?? w.reserve,
+      })),
+    };
+    upgradeMenu.show(upg => {
+      player.applyUpgrade(upg);
       upgradeMenu.hide();
       paused            = false;
       gameState         = 'between_waves';
@@ -547,7 +785,7 @@ function checkWaveEnd() {
         hud.showWaveAnnouncement(waveManager.wave, isBoss);
         gameState = 'playing';
       }, 1500);
-    });
+    }, playerState);
   }, 800);
 }
 
@@ -605,7 +843,7 @@ function gameLoop(time) {
   const dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
 
-  if (paused || gameState === 'title' || gameState === 'char_select') {
+  if (paused || gameState === 'title' || gameState === 'char_select' || gameState === 'map_select') {
     renderer.render(scene, camera);
     return;
   }
@@ -628,6 +866,14 @@ function gameLoop(time) {
   projSystem.update(dt, waveManager.enemies, player);
   grenadeSystem.update(dt);
   resourceNodes.update(dt);
+
+  // Fire zones (molotov) — apply tick damage to player
+  if (fireZoneSystem) {
+    for (const hit of fireZoneSystem.update(dt, player.position)) {
+      player.takeDamage(hit.damage);
+      hud.flashDamage();
+    }
+  }
 
   // Pickups
   for (const p of dropSystem.update(dt, player.position)) {
@@ -658,6 +904,7 @@ function gameLoop(time) {
   hud.update(dt, player.getHUDState(), waveManager.wave);
   updateMuzzle(dt);
   updateRailBeams(dt);
+  // updateViewmodel(dt); // disabled
   updateEPrompt();
   updateDebug();
 
@@ -683,15 +930,14 @@ function _applyEnemyProjectileHits(_dt) {
 
 // ── Start Game ────────────────────────────────────────────────────────────────
 
-function startGame(charId) {
+function startGame(charId, mapData = null) {
   // Clear scene geometry except lights (rebuild)
   while (scene.children.length > 0) scene.remove(scene.children[0]);
 
-  // Level
-  const arena      = new FixedArena();
-  const levelGroup = arena.build();
-  scene.add(levelGroup);
-  collision = new CollisionSystem(arena.getColliders());
+  // Level — JsonMapBuilder for custom maps, FixedArena for default
+  const arena = mapData ? new JsonMapBuilder(mapData) : new FixedArena();
+  scene.add(arena.build());
+  collision = new CollisionSystem(arena.getColliders(), arena.wallHeight ?? 6);
 
   // Player
   const charDef = getCharacter(charId);
@@ -702,13 +948,17 @@ function startGame(charId) {
   projSystem    = new ProjectileSystem(scene, collision);
   grenadeSystem = new GrenadeSystem(scene, collision);
   dropSystem    = new DropSystem(scene);
+  if (fireZoneSystem) fireZoneSystem.dispose();
+  fireZoneSystem = new FireZoneSystem(scene);
 
-  // Resource nodes at the 4 arena corners
-  const corners = [
-    new THREE.Vector3(-22, 0, -22), new THREE.Vector3( 22, 0, -22),
-    new THREE.Vector3(-22, 0,  22), new THREE.Vector3( 22, 0,  22),
-  ];
-  resourceNodes = new ResourceNodes(scene, corners, (pos) => {
+  // Resource nodes: from map definition if any, else 4 default corners
+  const rnPositions = (mapData?.resourceNodes?.length > 0)
+    ? mapData.resourceNodes.map(p => new THREE.Vector3(p.x, 0, p.z))
+    : [
+        new THREE.Vector3(-22, 0, -22), new THREE.Vector3( 22, 0, -22),
+        new THREE.Vector3(-22, 0,  22), new THREE.Vector3( 22, 0,  22),
+      ];
+  resourceNodes = new ResourceNodes(scene, rnPositions, (pos) => {
     const playerWeaponIds = player.weapons.map(w => w.def.id);
     const r = Math.random();
     if (r < 0.30) {
@@ -719,7 +969,7 @@ function startGame(charId) {
       // Ammo for a random weapon the player carries
       const wid = playerWeaponIds[Math.floor(Math.random() * playerWeaponIds.length)];
       const AMTS = { shotgun: 20, rocket: 5, railgun: 10, machinegun: 40, nailgun: 20, fists: 0 };
-      const amt  = AMTS[wid] ?? 12;
+      const amt  = Math.round((AMTS[wid] ?? 12) * DROP_SETTINGS.resourceAmmoMult);
       if (amt > 0) dropSystem.spawn(pos, { type: 'ammo', weaponId: wid, amount: amt });
       else         dropSystem.spawn(pos, { type: 'health', amount: 20 }); // fists → health instead
     } else {
@@ -733,7 +983,8 @@ function startGame(charId) {
     }
   });
   waveManager = new WaveManager(scene, arena.getSpawnPoints(), arena.getBounds(), collision);
-  waveManager.onEnemyDeath = onEnemyDeath;
+  waveManager.onEnemyDeath    = onEnemyDeath;
+  waveManager.onSpecialAttack = onEnemySpecialAttack;
 
   // UI
   hud         = new HUD();
@@ -742,6 +993,8 @@ function startGame(charId) {
   if (!balanceMenu) balanceMenu = new BalanceMenu();
   if (!debugMenu)   debugMenu   = new DebugMenu();
   hud.show();
+  if (mapData?.name) hud.showPickup('map', 0, mapData.name);
+  // viewmodel = new WeaponViewModel(); // disabled
 
   // Wire debug menu callbacks to current player/dropSystem
   const CENTER = new THREE.Vector3(0, 0, 0);
@@ -787,13 +1040,30 @@ function startGame(charId) {
 function showCharSelect() {
   document.getElementById('title-screen').classList.add('hidden');
   gameState = 'char_select';
+
   const charSelect = new CharacterSelect();
-  charSelect.show(startGame);
+  const mapSelect  = new MapSelect();
+
+  function goToMapSelect(charId) {
+    document.getElementById('char-select').classList.add('hidden');
+    gameState = 'map_select';
+    mapSelect.show(
+      () => {
+        // Back → return to char select
+        gameState = 'char_select';
+        document.getElementById('char-select').classList.remove('hidden');
+        charSelect.show(goToMapSelect);
+      },
+      (mapData) => startGame(charId, mapData),
+    );
+  }
+
+  charSelect.show(goToMapSelect);
 }
 
 // Boot render loop (title + char select — scene empty but renderer ticks)
 requestAnimationFrame(function bootLoop(t) {
-  if (gameState === 'title' || gameState === 'char_select') {
+  if (gameState === 'title' || gameState === 'char_select' || gameState === 'map_select') {
     requestAnimationFrame(bootLoop);
     renderer.render(scene, camera);
   }
@@ -819,6 +1089,7 @@ requestAnimationFrame(function bootLoop(t) {
       if (ENEMY_DEFS[id]) Object.assign(ENEMY_DEFS[id], vals);
     }
   }
+  if (saved.drops) Object.assign(DROP_SETTINGS, saved.drops);
 })();
 
 // Title screen button

@@ -2,10 +2,11 @@
 // Open/close with Tab. Changes apply instantly; Reset restores original values.
 // Mutates CHARACTERS[].baseStats, WEAPON_DEFS, and ENEMY_DEFS directly.
 
-import { CHARACTERS } from '../characters.js';
-import { WEAPON_DEFS } from '../weapons.js';
-import { ENEMY_DEFS }  from '../enemies.js';
-import { SaveSystem }  from '../systems/SaveSystem.js';
+import { CHARACTERS }    from '../characters.js';
+import { WEAPON_DEFS }   from '../weapons.js';
+import { ENEMY_DEFS }    from '../enemies.js';
+import { DROP_SETTINGS } from '../dropSettings.js';
+import { SaveSystem }    from '../systems/SaveSystem.js';
 
 export class BalanceMenu {
   constructor() {
@@ -33,6 +34,7 @@ export class BalanceMenu {
       characters: CHARACTERS.map(c => ({ id: c.id, stats: { ...c.baseStats } })),
       weapons:    Object.fromEntries(Object.entries(WEAPON_DEFS).map(([id, d]) => [id, { ...d }])),
       enemies:    Object.fromEntries(Object.entries(ENEMY_DEFS).map(([id, d]) => [id, { ...d }])),
+      drops:      { ...DROP_SETTINGS },
     };
   }
 
@@ -41,6 +43,7 @@ export class BalanceMenu {
       characters: CHARACTERS.map(c => ({ id: c.id, stats: { ...c.baseStats } })),
       weapons:    Object.fromEntries(Object.entries(WEAPON_DEFS).map(([id, d]) => [id, { ...d }])),
       enemies:    Object.fromEntries(Object.entries(ENEMY_DEFS).map(([id, d]) => [id, { ...d }])),
+      drops:      { ...DROP_SETTINGS },
     };
   }
 
@@ -53,11 +56,89 @@ export class BalanceMenu {
     }
     for (const [id, snap] of Object.entries(this._defaults.weapons)) Object.assign(WEAPON_DEFS[id], snap);
     for (const [id, snap] of Object.entries(this._defaults.enemies)) Object.assign(ENEMY_DEFS[id],  snap);
+    if (this._defaults.drops) Object.assign(DROP_SETTINGS, this._defaults.drops);
     // Rebuild so sliders reflect reset values
     this._built = false;
     this._el.innerHTML = '';
     this._buildUI();
     this._built = true;
+  }
+
+  // ── Export / Import ─────────────────────────────────────────────────────────
+
+  _exportBalance(btn) {
+    const snapshot = this._currentSnapshot();
+    // Add a version tag and timestamp so files are self-identifying
+    const payload = {
+      _version: 1,
+      _date:    new Date().toISOString().slice(0, 19).replace('T', ' '),
+      ...snapshot,
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `balance_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    const orig = btn.textContent;
+    btn.textContent = 'EXPORTED ✓';
+    setTimeout(() => { btn.textContent = orig; }, 1600);
+  }
+
+  _importBalance(btn) {
+    const input   = document.createElement('input');
+    input.type    = 'file';
+    input.accept  = '.json,application/json';
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          this._applySnapshot(data);
+          // Persist and rebuild sliders so they reflect new values
+          SaveSystem.saveBalance(this._currentSnapshot());
+          this._built = false;
+          this._el.innerHTML = '';
+          this._buildUI();
+          this._built = true;
+          const orig = btn.textContent;
+          btn.textContent = 'IMPORTED ✓';
+          setTimeout(() => { btn.textContent = orig; }, 1600);
+        } catch (err) {
+          alert('Failed to load balance file:\n' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  _applySnapshot(data) {
+    if (data.characters) {
+      for (const snap of data.characters) {
+        const c = CHARACTERS.find(c => c.id === snap.id);
+        if (c) Object.assign(c.baseStats, snap.stats);
+      }
+    }
+    if (data.weapons) {
+      for (const [id, vals] of Object.entries(data.weapons)) {
+        if (WEAPON_DEFS[id]) Object.assign(WEAPON_DEFS[id], vals);
+      }
+    }
+    if (data.enemies) {
+      for (const [id, vals] of Object.entries(data.enemies)) {
+        if (ENEMY_DEFS[id]) Object.assign(ENEMY_DEFS[id], vals);
+      }
+    }
+    if (data.drops) {
+      for (const [k, v] of Object.entries(data.drops)) {
+        if (k in DROP_SETTINGS) DROP_SETTINGS[k] = v;
+      }
+    }
   }
 
   // ── Build UI ────────────────────────────────────────────────────────────────
@@ -79,6 +160,19 @@ export class BalanceMenu {
     resetBtn.textContent = 'RESET ALL';
     resetBtn.className = 'bm-btn reset';
     resetBtn.onclick = () => this._resetAll();
+
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'EXPORT';
+    exportBtn.className = 'bm-btn';
+    exportBtn.title = 'Export current balance as a JSON file';
+    exportBtn.onclick = () => this._exportBalance(exportBtn);
+
+    const importBtn = document.createElement('button');
+    importBtn.textContent = 'IMPORT';
+    importBtn.className = 'bm-btn';
+    importBtn.title = 'Import a balance JSON file';
+    importBtn.onclick = () => this._importBalance(importBtn);
+
     const clearBtn = document.createElement('button');
     clearBtn.textContent = 'CLEAR SAVE DATA';
     clearBtn.className = 'bm-btn reset';
@@ -94,7 +188,7 @@ export class BalanceMenu {
     closeBtn.textContent = 'CLOSE [Tab]';
     closeBtn.className = 'bm-btn';
     closeBtn.onclick = () => this.hide();
-    btnRow.append(resetBtn, clearBtn, closeBtn);
+    btnRow.append(resetBtn, exportBtn, importBtn, clearBtn, closeBtn);
     header.append(title, hint, btnRow);
     this._el.appendChild(header);
 
@@ -150,7 +244,18 @@ export class BalanceMenu {
       ]));
     }
 
-    body.append(colChar, colWep, colEnemy);
+    // ── Drops ──
+    const colDrop = document.createElement('div');
+    colDrop.className = 'bm-col';
+    const ds = DROP_SETTINGS;
+    colDrop.appendChild(this._section('DROPS', [
+      this._row('Enemy Drop Chance', ds.enemyDropChance, 0, 1,    0.05, v => { ds.enemyDropChance  = v; }),
+      this._row('Ammo Drop Weight',  ds.ammoDropWeight,  0, 1,    0.05, v => { ds.ammoDropWeight   = v; }),
+      this._row('Ammo Amount ×',     ds.ammoMultiplier,  0.25, 5, 0.25, v => { ds.ammoMultiplier   = v; }),
+      this._row('Resource Ammo ×',   ds.resourceAmmoMult, 0.25, 5, 0.25, v => { ds.resourceAmmoMult = v; }),
+    ]));
+
+    body.append(colChar, colWep, colEnemy, colDrop);
     this._el.appendChild(body);
   }
 

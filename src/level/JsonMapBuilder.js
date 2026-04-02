@@ -14,6 +14,7 @@ export class JsonMapBuilder extends IMapBuilder {
     this._colliders = [];
     this._spawnPoints = [];
     this._group     = new THREE.Group();
+    this.wallHeight = mapData.wallHeight ?? 6;
   }
 
   build() {

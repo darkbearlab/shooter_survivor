@@ -42,12 +42,25 @@
 - [ ] Boss wave 視覺與特殊行為
 - [ ] 換彈動畫 HUD 進度條
 
-## Phase 6 — Custom Map System (planned)
-- [ ] 獨立地圖編輯器入口（e.g. `map-editor.html`，與遊戲主入口分離）
-- [ ] 地圖格式定義：JSON 描述 box/pillar/wall 物件，含碰撞資訊
-- [ ] MapLoader：讀取 JSON → 呼叫 `_addBox` 等方法建立場景
-- [ ] 取代 FixedArena，讓遊戲主場景改由 JSON 驅動
-- [ ] 支援多張地圖，角色選擇後可選地圖
+## Phase 6 — Custom Map System (partial) ✅
+- [x] 獨立地圖編輯器入口（`map-editor.html`，與遊戲主入口分離）
+- [x] 地圖格式定義：JSON 描述 box/pillar/platform/wall 物件，含碰撞資訊
+- [x] JsonMapBuilder：讀取 JSON → 建立場景（IMapBuilder 介面）
+- [x] EditorState / GridView / Preview3D：2D 俯視編輯 + 即時 3D 預覽
+- [x] 角色選擇後插入地圖選擇畫面（Default Arena / 載入自訂地圖 JSON）
+- [x] JsonMapBuilder 接入遊戲主流程，資源點從地圖定義讀取
+- [ ] 取代 FixedArena 為預設地圖（目前保留兩者並存）
+
+## Phase 12 — New Enemy Types ✅
+- [x] **Molotov thrower**：拋擲燃燒彈，落地產生持續傷害火圈（FireZoneSystem）
+- [x] **Trishot**：三點放模式，同時發射三道子彈
+- [x] **Sniper**：準星閃爍瞄準 1.5s → hitscan 開火，橙色曳光彈殘影
+- [x] **Tank**：高血量慢速，發射火箭砲帶爆炸推力
+- [x] **Guerrilla**：開火後立即火箭跳躍逃離，有 Y 軸物理
+- [x] **Drone (gun)**：飛行，盤旋靠近後三連發，再撤退
+- [x] **Drone (bomb)**：飛行，盤旋後俯衝玩家，接觸時爆炸（同火箭威力）
+- [x] FireZoneSystem：持續傷害圓柱視覺 + 每 0.5s tick 傷害
+- [x] 波次生成依 wave 數逐步引入新敵人（wave 3/5/7/10 解鎖不同種類）
 
 ## Phase 7 — Player Active Skills / F Key ✅
 - [x] 加入 F 鍵主動技能輸入，與各角色定義綁定（`character.activeSkill`）

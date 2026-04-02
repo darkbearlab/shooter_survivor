@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 
 export class CollisionSystem {
-  constructor(colliders) {
+  constructor(colliders, ceilingY = 6) {
     // colliders: Array<{ min: Vector3, max: Vector3 }>
     this.colliders = colliders;
+    this.ceilingY  = ceilingY; // hard ceiling for player Y clamp
   }
 
   /**

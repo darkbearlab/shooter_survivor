@@ -80,7 +80,8 @@ export function makeColumnTexture() {
 // dir: 0=front, 1=walk1, 2=walk2 (for future animation)
 
 export function makeEnemyTexture(type = 'soldier') {
-  const [c, ctx] = makeCanvas(32, 48);
+  const large = type === 'tank';
+  const [c, ctx] = makeCanvas(large ? 64 : 32, large ? 80 : 48);
   ctx.clearRect(0, 0, 32, 48);
 
   if (type === 'soldier') {
@@ -137,6 +138,105 @@ export function makeEnemyTexture(type = 'soldier') {
     ctx.fillStyle = '#88ccff';
     ctx.fillRect(22, 22, 9, 2);
     ctx.fillRect(22, 25, 9, 2);
+
+  } else if (type === 'molotov') {
+    // Olive-green coat, holding fire bottle
+    ctx.fillStyle = '#556633';
+    ctx.fillRect(10, 16, 12, 18);
+    ctx.fillStyle = '#99aa55';
+    ctx.fillRect(11, 6, 10, 10);
+    ctx.fillStyle = '#ff4400'; ctx.fillRect(13, 9, 2, 2); ctx.fillRect(17, 9, 2, 2);
+    ctx.fillStyle = '#445522'; ctx.fillRect(10, 34, 5, 10); ctx.fillRect(17, 34, 5, 10);
+    ctx.fillStyle = '#445522'; ctx.fillRect(5, 17, 5, 12); ctx.fillRect(22, 17, 5, 12);
+    // fire bottle in hand
+    ctx.fillStyle = '#885500'; ctx.fillRect(23, 20, 4, 7);
+    ctx.fillStyle = '#ff8800'; ctx.fillRect(24, 18, 2, 3);
+    ctx.fillStyle = '#ffee00'; ctx.fillRect(24, 17, 2, 2);
+
+  } else if (type === 'trishot') {
+    // Purple body, three gun barrels
+    ctx.fillStyle = '#6633aa';
+    ctx.fillRect(10, 16, 12, 18);
+    ctx.fillStyle = '#cc88ff';
+    ctx.fillRect(11, 6, 10, 10);
+    ctx.fillStyle = '#ffff88'; ctx.fillRect(13, 9, 2, 2); ctx.fillRect(17, 9, 2, 2);
+    ctx.fillStyle = '#441188'; ctx.fillRect(10, 34, 5, 10); ctx.fillRect(17, 34, 5, 10);
+    ctx.fillStyle = '#5522aa'; ctx.fillRect(5, 17, 5, 12); ctx.fillRect(22, 17, 5, 12);
+    // three barrels
+    ctx.fillStyle = '#333'; ctx.fillRect(22, 18, 8, 2);
+    ctx.fillStyle = '#444'; ctx.fillRect(22, 22, 8, 2);
+    ctx.fillStyle = '#333'; ctx.fillRect(22, 26, 8, 2);
+
+  } else if (type === 'sniper') {
+    // Dark grey, long rifle, scope glint
+    ctx.fillStyle = '#334455';
+    ctx.fillRect(10, 16, 12, 18);
+    ctx.fillStyle = '#556677';
+    ctx.fillRect(11, 6, 10, 10);
+    ctx.fillStyle = '#88ccff'; ctx.fillRect(13, 9, 2, 2); ctx.fillRect(17, 9, 2, 2);
+    ctx.fillStyle = '#223344'; ctx.fillRect(10, 34, 5, 10); ctx.fillRect(17, 34, 5, 10);
+    ctx.fillStyle = '#334455'; ctx.fillRect(5, 17, 5, 12); ctx.fillRect(22, 17, 5, 12);
+    // long rifle
+    ctx.fillStyle = '#222'; ctx.fillRect(22, 22, 10, 2);
+    // scope
+    ctx.fillStyle = '#00eeff'; ctx.fillRect(26, 20, 3, 3);
+
+  } else if (type === 'tank') {
+    // Large 64×80 canvas — handled in makeEnemyTexture with size check
+    // Gray bulk, rocket launcher on shoulder
+    ctx.fillStyle = '#7a7a88';
+    ctx.fillRect(16, 24, 32, 28);
+    ctx.fillStyle = '#aaaacc';
+    ctx.fillRect(20, 8, 24, 20);
+    ctx.fillStyle = '#ff3300'; ctx.fillRect(24, 14, 4, 4); ctx.fillRect(36, 14, 4, 4);
+    ctx.fillStyle = '#555566'; ctx.fillRect(16, 52, 12, 20); ctx.fillRect(36, 52, 12, 20);
+    ctx.fillStyle = '#555566'; ctx.fillRect(4, 25, 12, 20); ctx.fillRect(48, 25, 12, 20);
+    // rocket launcher tube on shoulder
+    ctx.fillStyle = '#444'; ctx.fillRect(46, 14, 14, 8);
+    ctx.fillStyle = '#666'; ctx.fillRect(44, 16, 4, 4);
+
+  } else if (type === 'guerrilla') {
+    // Orange, jetpack flames at feet
+    ctx.fillStyle = '#cc4400';
+    ctx.fillRect(10, 16, 12, 18);
+    ctx.fillStyle = '#ff8844';
+    ctx.fillRect(11, 6, 10, 10);
+    ctx.fillStyle = '#ffee00'; ctx.fillRect(13, 9, 2, 2); ctx.fillRect(17, 9, 2, 2);
+    ctx.fillStyle = '#882200'; ctx.fillRect(10, 34, 5, 10); ctx.fillRect(17, 34, 5, 10);
+    ctx.fillStyle = '#aa3300'; ctx.fillRect(5, 17, 5, 12); ctx.fillRect(22, 17, 5, 12);
+    // rocket launcher
+    ctx.fillStyle = '#333'; ctx.fillRect(22, 21, 9, 4);
+    // jetpack flame
+    ctx.fillStyle = '#ff8800'; ctx.fillRect(12, 42, 3, 5); ctx.fillRect(17, 42, 3, 5);
+    ctx.fillStyle = '#ffee00'; ctx.fillRect(13, 44, 2, 3); ctx.fillRect(18, 44, 2, 3);
+
+  } else if (type === 'drone_gun') {
+    // Blue-grey disc body, gun barrel, single eye
+    ctx.fillStyle = '#445566';
+    ctx.ellipse(16, 28, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6688aa';
+    ctx.beginPath(); ctx.ellipse(16, 26, 8, 6, 0, 0, Math.PI * 2); ctx.fill();
+    // eye
+    ctx.fillStyle = '#00ccff'; ctx.fillRect(13, 23, 6, 4);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(14, 24, 2, 2);
+    // gun
+    ctx.fillStyle = '#333'; ctx.fillRect(26, 27, 6, 2);
+    // rotors (stylised)
+    ctx.fillStyle = '#334455aa'; ctx.fillRect(4, 20, 5, 2); ctx.fillRect(23, 20, 5, 2);
+
+  } else if (type === 'drone_bomb') {
+    // Red disc with spikes
+    ctx.fillStyle = '#bb1100';
+    ctx.beginPath(); ctx.ellipse(16, 28, 12, 8, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ff4422';
+    ctx.beginPath(); ctx.ellipse(16, 26, 7, 5, 0, 0, Math.PI * 2); ctx.fill();
+    // fuse / eye
+    ctx.fillStyle = '#ffee00'; ctx.fillRect(14, 23, 4, 4);
+    ctx.fillStyle = '#ff0000'; ctx.fillRect(15, 24, 2, 2);
+    // spikes
+    ctx.fillStyle = '#882200';
+    ctx.fillRect(4, 26, 4, 3); ctx.fillRect(24, 26, 4, 3);
+    ctx.fillRect(13, 17, 3, 4); ctx.fillRect(13, 35, 3, 4);
   }
 
   return canvasToTexture(c);
