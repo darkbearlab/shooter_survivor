@@ -51,7 +51,7 @@ let hud          = null;
 let upgradeMenu  = null;
 let balanceMenu  = null;
 let debugMenu    = null;
-let gameState    = 'char_select'; // 'char_select' | 'playing' | 'upgrading' | 'between_waves' | 'dead'
+let gameState    = 'title'; // 'title' | 'char_select' | 'playing' | 'upgrading' | 'between_waves' | 'dead'
 let paused       = false;
 let waveCheckCooldown = 0;
 let lastTime     = 0;
@@ -63,6 +63,12 @@ const lockPrompt = document.getElementById('lock-prompt');
 
 canvas.addEventListener('click', () => {
   if (gameState === 'playing' && !paused) canvas.requestPointerLock();
+});
+document.addEventListener('keydown', e => {
+  if (gameState === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
+    e.preventDefault();
+    showCharSelect();
+  }
 });
 document.addEventListener('pointerlockchange', () => {
   lockPrompt.classList.toggle('hidden', !!document.pointerLockElement || paused || gameState !== 'playing');
@@ -582,7 +588,7 @@ function gameLoop(time) {
   const dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
 
-  if (paused || gameState === 'char_select') {
+  if (paused || gameState === 'title' || gameState === 'char_select') {
     renderer.render(scene, camera);
     return;
   }
@@ -759,15 +765,22 @@ function startGame(charId) {
   }
 }
 
-// ── Boot: show character select ───────────────────────────────────────────────
+// ── Boot ──────────────────────────────────────────────────────────────────────
 
-// Render loop for char select screen (scene is empty but renderer needs to tick)
+function showCharSelect() {
+  document.getElementById('title-screen').classList.add('hidden');
+  gameState = 'char_select';
+  const charSelect = new CharacterSelect();
+  charSelect.show(startGame);
+}
+
+// Boot render loop (title + char select — scene empty but renderer ticks)
 requestAnimationFrame(function bootLoop(t) {
-  if (gameState === 'char_select') {
+  if (gameState === 'title' || gameState === 'char_select') {
     requestAnimationFrame(bootLoop);
     renderer.render(scene, camera);
   }
 });
 
-const charSelect = new CharacterSelect();
-charSelect.show(startGame);
+// Title screen button
+document.getElementById('title-start-btn').addEventListener('click', showCharSelect);
