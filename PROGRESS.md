@@ -38,7 +38,7 @@
 - [x] 遠程敵人投射物（onEnemyFireProjectile callback 接入 WaveManager）
 - [x] 投射物尾跡（Line geometry 跟隨彈頭）
 - [x] 玩家武器切換 [1] Shotgun / [2] Rocket，player.weapons[] 陣列
-- [ ] Railgun（穿透 hitscan + 軌跡線）
+- [x] Railgun（穿透 hitscan + 青色軌跡線，移至 Phase 9 實作）
 - [ ] Boss wave 視覺與特殊行為
 - [ ] 換彈動畫 HUD 進度條
 
@@ -49,18 +49,19 @@
 - [ ] 取代 FixedArena，讓遊戲主場景改由 JSON 驅動
 - [ ] 支援多張地圖，角色選擇後可選地圖
 
-## Phase 7 — Player Active Skills / F Key (planned)
-- [ ] 加入 F 鍵主動技能輸入，與各角色定義綁定
-- [ ] 技能冷卻 UI（HUD 顯示 F 鍵冷卻進度條）
-- [ ] Ranger 主動技能：投擲手榴彈（見 Phase 8）
-- [ ] 其他角色主動技能預留介面（skill() 方法 per-character）
+## Phase 7 — Player Active Skills / F Key ✅
+- [x] 加入 F 鍵主動技能輸入，與各角色定義綁定（`character.activeSkill`）
+- [x] 技能冷卻 UI（HUD 中央下方進度條，顯示剩餘秒數 / READY）
+- [x] Ranger 主動技能：投擲手榴彈（見 Phase 8）
+- [x] 其他角色主動技能預留介面（`tryUseSkill()` 回傳 `{ skillId, aimRay }`）
 
-## Phase 8 — Ranger Grenade (planned)
-- [ ] 拋物線投射物（加入重力 Y 加速度，初速度含 upward 分量）
-- [ ] 手榴彈與牆壁/地板碰撞反彈或停止（使用 CollisionSystem.raycast）
-- [ ] 定時引爆（計時器，到期後觸發 splash 爆炸）
-- [ ] 爆炸效果複用 ProjectileSystem._explode()，並對玩家/敵人施加 splash 傷害
-- [ ] 手榴彈模型（Canvas 生成的圓形 sprite，區別於 rocket 顏色）
+## Phase 8 — Ranger Grenade ✅
+- [x] 拋物線投射物（GRAVITY = 22，初速 15 + upward +6）
+- [x] 手榴彈與牆壁/地板碰撞反彈（最多 2 次，BOUNCE_DAMP 0.45），之後靜止
+- [x] 定時引爆（fuseTime 3s），最後 0.8s 閃紅
+- [x] 爆炸：splash 傷害對敵人 + 自傷（35%），綠/黃/橘粒子 20 顆
+- [x] 手榴彈模型（橄欖綠 Canvas sprite，旋轉動畫，引信黃點）
+- [x] Soldier 角色同樣使用手榴彈技能（cooldown 8s）
 
 ## Phase 9 — More Weapons ✅
 - [x] **拳套（Fists）**：近戰 ray vs AABB，傷害 80，射程 2.4m，只能從掉落物取得
@@ -82,8 +83,10 @@
 - [x] 調整即時套用，重置為預設值按鈕
 - [x] **Debug 作弊選單**（反引號 ` 開啟）：生成道具/武器/彈藥到地圖中央、補滿 HP+護甲、補滿彈藥、無敵模式切換
 
-## Phase 11 — Persistence / localStorage (planned)
-- [ ] 高分排行榜存入 localStorage（前 10 名，含角色/波次/擊殺/分數）
-- [ ] 平衡參數設定持久化（玩家調整後自動儲存，下次啟動自動載入）
-- [ ] 角色選擇畫面顯示該角色最高紀錄
-- [ ] 清除存檔按鈕（設定面板內）
+## Phase 11 — Persistence / localStorage ✅
+- [x] 高分排行榜存入 localStorage（前 10 名，含角色/波次/擊殺/分數）
+- [x] 平衡參數設定持久化（slider 調整後自動儲存，下次啟動自動載入套用）
+- [x] 角色選擇畫面顯示該角色最高紀錄（★ BEST: Wave / Kills / Score）
+- [x] 遊戲結束畫面顯示 ★ NEW BEST 提示
+- [x] 清除存檔按鈕（Balance Menu 內，確認對話框後清除全部）
+- [x] Reset All 同時清除 localStorage 中的 balance 設定

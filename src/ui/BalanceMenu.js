@@ -5,6 +5,7 @@
 import { CHARACTERS } from '../characters.js';
 import { WEAPON_DEFS } from '../weapons.js';
 import { ENEMY_DEFS }  from '../enemies.js';
+import { SaveSystem }  from '../systems/SaveSystem.js';
 
 export class BalanceMenu {
   constructor() {
@@ -27,6 +28,14 @@ export class BalanceMenu {
 
   // ── Snapshot / Reset ────────────────────────────────────────────────────────
 
+  _currentSnapshot() {
+    return {
+      characters: CHARACTERS.map(c => ({ id: c.id, stats: { ...c.baseStats } })),
+      weapons:    Object.fromEntries(Object.entries(WEAPON_DEFS).map(([id, d]) => [id, { ...d }])),
+      enemies:    Object.fromEntries(Object.entries(ENEMY_DEFS).map(([id, d]) => [id, { ...d }])),
+    };
+  }
+
   _snapshot() {
     return {
       characters: CHARACTERS.map(c => ({ id: c.id, stats: { ...c.baseStats } })),
@@ -36,6 +45,8 @@ export class BalanceMenu {
   }
 
   _resetAll() {
+    SaveSystem.saveBalance(null); // wipe persisted balance
+    localStorage.removeItem('shooter_survivor_balance');
     for (const snap of this._defaults.characters) {
       const c = CHARACTERS.find(c => c.id === snap.id);
       if (c) Object.assign(c.baseStats, snap.stats);
@@ -68,11 +79,22 @@ export class BalanceMenu {
     resetBtn.textContent = 'RESET ALL';
     resetBtn.className = 'bm-btn reset';
     resetBtn.onclick = () => this._resetAll();
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'CLEAR SAVE DATA';
+    clearBtn.className = 'bm-btn reset';
+    clearBtn.title = 'Clears high scores and saved balance settings';
+    clearBtn.onclick = () => {
+      if (confirm('Clear all saved scores and balance settings?')) {
+        SaveSystem.clearAll();
+        clearBtn.textContent = 'CLEARED ✓';
+        setTimeout(() => { clearBtn.textContent = 'CLEAR SAVE DATA'; }, 1800);
+      }
+    };
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'CLOSE [Tab]';
     closeBtn.className = 'bm-btn';
     closeBtn.onclick = () => this.hide();
-    btnRow.append(resetBtn, closeBtn);
+    btnRow.append(resetBtn, clearBtn, closeBtn);
     header.append(title, hint, btnRow);
     this._el.appendChild(header);
 
@@ -166,6 +188,8 @@ export class BalanceMenu {
       const v = parseFloat(inp.value);
       val.textContent = step < 1 ? v.toFixed(step < 0.05 ? 2 : 1) : Math.round(v);
       onChange(v);
+      // Auto-save after each change
+      SaveSystem.saveBalance(this._currentSnapshot());
     });
 
     row.append(lbl, inp, val);

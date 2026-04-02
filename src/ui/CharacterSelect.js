@@ -1,5 +1,6 @@
 import { CHARACTERS } from '../characters.js';
 import { makeCharPortraitCanvas } from '../utils/PlaceholderTextures.js';
+import { SaveSystem } from '../systems/SaveSystem.js';
 
 export class CharacterSelect {
   constructor() {
@@ -33,6 +34,12 @@ export class CharacterSelect {
         ? `<div class="passive" style="color:#99dd66"><strong>F — ${char.activeSkill.name}:</strong> ${char.activeSkill.description}</div>`
         : '';
 
+      const best = SaveSystem.getBestForChar(char.id);
+      const bestHTML = best
+        ? `<div class="passive" style="color:#ffdd44;margin-top:6px">` +
+          `★ BEST: Wave ${best.wave}  Kills ${best.kills}  Score ${best.score}</div>`
+        : `<div class="passive" style="color:#444;margin-top:6px">No record yet</div>`;
+
       card.innerHTML = `
         <div class="char-sprite"></div>
         <h3>${char.name}</h3>
@@ -41,6 +48,7 @@ export class CharacterSelect {
         <div class="passive"><strong>${char.passive.name}:</strong> ${char.passive.description}</div>
         ${skillText}
         <div class="passive" style="color:#ffdd88"><strong>Weapons:</strong> ${weaponsText}</div>
+        ${bestHTML}
       `;
       card.querySelector('.char-sprite').replaceWith(portrait);
       portrait.className = 'char-sprite';

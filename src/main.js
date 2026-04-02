@@ -9,10 +9,11 @@ import { ProjectileSystem }  from './systems/ProjectileSystem.js';
 import { DropSystem }        from './systems/DropSystem.js';
 import { GrenadeSystem }     from './systems/GrenadeSystem.js';
 import { ResourceNodes }     from './systems/ResourceNodes.js';
+import { SaveSystem }        from './systems/SaveSystem.js';
 import { WEAPON_DEFS }       from './weapons.js';
 import { FixedArena }        from './level/FixedArena.js';
-import { getCharacter }      from './characters.js';
-import { WaveManager }       from './enemies.js';
+import { getCharacter, CHARACTERS } from './characters.js';
+import { WaveManager, ENEMY_DEFS } from './enemies.js';
 import { UpgradeMenu }       from './ui/UpgradeMenu.js';
 import { HUD }               from './ui/HUD.js';
 import { CharacterSelect }   from './ui/CharacterSelect.js';
@@ -558,10 +559,26 @@ function triggerGameOver() {
   paused    = true;
   document.exitPointerLock();
   hud.hide();
+
+  // Save score
+  SaveSystem.saveScore({
+    charId:   player.character.id,
+    charName: player.character.name,
+    wave:     waveManager.wave,
+    kills:    player.totalKills,
+    score:    player.score,
+  });
+
+  // Check if this run is a new personal best for this character
+  const best    = SaveSystem.getBestForChar(player.character.id);
+  const isNewBest = best && best.score === player.score &&
+                    best.date === SaveSystem.getScores()[0]?.date;
+
   document.getElementById('game-over-stats').innerHTML =
     `<strong>Wave Reached:</strong> ${waveManager.wave}<br>` +
     `<strong>Total Kills:</strong> ${player.totalKills}<br>` +
-    `<strong>Score:</strong> ${player.score}`;
+    `<strong>Score:</strong> ${player.score}` +
+    (isNewBest ? '<br><span style="color:#ffdd44;letter-spacing:2px">★ NEW BEST ★</span>' : '');
   document.getElementById('game-over').classList.remove('hidden');
 }
 
@@ -781,6 +798,28 @@ requestAnimationFrame(function bootLoop(t) {
     renderer.render(scene, camera);
   }
 });
+
+// Load persisted balance settings on startup
+(function applyPersistedBalance() {
+  const saved = SaveSystem.loadBalance();
+  if (!saved) return;
+  if (saved.characters) {
+    for (const snap of saved.characters) {
+      const c = CHARACTERS.find(c => c.id === snap.id);
+      if (c) Object.assign(c.baseStats, snap.stats);
+    }
+  }
+  if (saved.weapons) {
+    for (const [id, vals] of Object.entries(saved.weapons)) {
+      if (WEAPON_DEFS[id]) Object.assign(WEAPON_DEFS[id], vals);
+    }
+  }
+  if (saved.enemies) {
+    for (const [id, vals] of Object.entries(saved.enemies)) {
+      if (ENEMY_DEFS[id]) Object.assign(ENEMY_DEFS[id], vals);
+    }
+  }
+})();
 
 // Title screen button
 document.getElementById('title-start-btn').addEventListener('click', showCharSelect);
