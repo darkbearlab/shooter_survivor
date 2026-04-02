@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shooter Survivor</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.162.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.162.0/examples/jsm/"
+    }
+  }
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+    #canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+
+    /* Overlay screens */
+    .screen {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.85);
+      color: #e8d090;
+      z-index: 100;
+    }
+    .screen.hidden { display: none; }
+
+    .screen h1 {
+      font-size: 48px;
+      text-shadow: 0 0 20px #ff6600;
+      letter-spacing: 6px;
+      margin-bottom: 8px;
+    }
+    .screen h2 {
+      font-size: 22px;
+      color: #aaa;
+      margin-bottom: 48px;
+      letter-spacing: 3px;
+    }
+
+    /* Character Select */
+    #char-select .char-cards {
+      display: flex; gap: 32px;
+    }
+    .char-card {
+      width: 180px;
+      border: 2px solid #444;
+      padding: 20px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      background: rgba(255,255,255,0.03);
+    }
+    .char-card:hover { border-color: #ff6600; background: rgba(255,102,0,0.1); }
+    .char-card.selected { border-color: #ff6600; background: rgba(255,102,0,0.2); }
+    .char-card .char-sprite {
+      width: 80px; height: 80px;
+      margin: 0 auto 12px;
+      image-rendering: pixelated;
+    }
+    .char-card h3 { font-size: 16px; margin-bottom: 8px; color: #ff9944; }
+    .char-card p { font-size: 11px; color: #aaa; line-height: 1.5; }
+    .char-card .stats { margin-top: 10px; font-size: 11px; text-align: left; }
+    .char-card .stats span { display: block; color: #ccc; }
+    .char-card .passive { margin-top: 8px; font-size: 10px; color: #88ccff; border-top: 1px solid #333; padding-top: 8px; }
+
+    #start-btn {
+      margin-top: 40px;
+      padding: 14px 48px;
+      background: #ff6600;
+      color: #000;
+      border: none;
+      font-size: 18px;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      letter-spacing: 3px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #start-btn:hover { background: #ff8833; }
+
+    /* HUD */
+    #hud {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #hud.hidden { display: none; }
+
+    #hud-bottom {
+      position: absolute; bottom: 24px; left: 0; right: 0;
+      display: flex; justify-content: space-between;
+      padding: 0 32px;
+      align-items: flex-end;
+    }
+    .hud-box {
+      background: rgba(0,0,0,0.6);
+      border: 1px solid #444;
+      padding: 8px 16px;
+      min-width: 120px;
+    }
+    .hud-label { font-size: 10px; color: #888; letter-spacing: 2px; text-transform: uppercase; }
+    .hud-value { font-size: 28px; color: #e8d090; font-weight: bold; }
+    .hud-value.red { color: #ff4444; }
+    .hud-value.blue { color: #4499ff; }
+    .hud-value.orange { color: #ff8800; }
+
+    #hud-bars {
+      position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+      text-align: center;
+    }
+    .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .bar-label { font-size: 10px; color: #888; width: 16px; text-align: right; }
+    .bar-bg { width: 160px; height: 10px; background: #222; border: 1px solid #444; }
+    .bar-fill { height: 100%; transition: width 0.1s; }
+    .bar-fill.hp { background: #44ff44; }
+    .bar-fill.armor { background: #4499ff; }
+
+    #hud-top {
+      position: absolute; top: 20px; left: 0; right: 0;
+      display: flex; justify-content: center; gap: 32px;
+    }
+    .hud-top-item { font-size: 13px; color: #aaa; letter-spacing: 2px; }
+    .hud-top-item strong { color: #ff9944; }
+
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 16px; height: 16px;
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: '';
+      position: absolute;
+      background: rgba(255,255,255,0.8);
+    }
+    #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+    #crosshair::after  { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
+
+    #hit-marker {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 20px; height: 20px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.05s;
+    }
+    #hit-marker.active { opacity: 1; }
+    #hit-marker::before, #hit-marker::after {
+      content: '';
+      position: absolute;
+      background: #ff4444;
+    }
+    #hit-marker::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+    #hit-marker::after  { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
+
+    /* Damage vignette */
+    #damage-vignette {
+      position: fixed; inset: 0;
+      background: radial-gradient(ellipse at center, transparent 60%, rgba(255,0,0,0.4) 100%);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      z-index: 9;
+    }
+    #damage-vignette.active { opacity: 1; }
+
+    /* Wave announcement */
+    #wave-announce {
+      position: fixed; top: 30%; left: 50%;
+      transform: translateX(-50%);
+      font-size: 36px;
+      color: #ff9944;
+      text-shadow: 0 0 20px #ff6600;
+      letter-spacing: 4px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 20;
+    }
+    #wave-announce.show { opacity: 1; }
+
+    /* Upgrade Menu */
+    #upgrade-menu {
+      z-index: 200;
+    }
+    #upgrade-menu h2 { font-size: 16px; color: #aaa; margin-bottom: 32px; letter-spacing: 4px; }
+    .upgrade-cards {
+      display: flex; gap: 24px;
+    }
+    .upgrade-card {
+      width: 160px;
+      border: 2px solid #444;
+      padding: 20px 16px;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      background: rgba(255,255,255,0.03);
+    }
+    .upgrade-card:hover { border-color: #ff9944; background: rgba(255,153,68,0.1); }
+    .upgrade-card .upgrade-icon { font-size: 32px; margin-bottom: 10px; }
+    .upgrade-card h3 { font-size: 14px; color: #e8d090; margin-bottom: 6px; }
+    .upgrade-card p { font-size: 11px; color: #999; line-height: 1.5; }
+
+    /* Game Over */
+    #game-over h1 { color: #ff3333; }
+    #game-over .stats-summary { margin: 20px 0 32px; font-size: 14px; color: #aaa; line-height: 2; text-align: center; }
+    #game-over .stats-summary strong { color: #e8d090; }
+    #restart-btn {
+      padding: 12px 40px;
+      background: transparent;
+      color: #ff6600;
+      border: 2px solid #ff6600;
+      font-size: 16px;
+      font-family: 'Courier New', monospace;
+      letter-spacing: 3px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #restart-btn:hover { background: rgba(255,102,0,0.2); }
+
+    /* Lock prompt */
+    #lock-prompt {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: #888;
+      font-size: 14px;
+      letter-spacing: 2px;
+      z-index: 50;
+      pointer-events: none;
+    }
+    #lock-prompt.hidden { display: none; }
+
+    /* Kill feed */
+    #kill-feed {
+      position: fixed; top: 80px; right: 24px;
+      width: 200px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .kill-entry {
+      font-size: 11px;
+      color: #ff9944;
+      text-align: right;
+      margin-bottom: 4px;
+      animation: fadeKill 2s forwards;
+    }
+    @keyframes fadeKill {
+      0% { opacity: 1; }
+      70% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* ── Balance & Debug menu shared styles ── */
+    #balance-menu, #debug-menu {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      background: rgba(0,0,0,0.93);
+      color: #e8d090;
+      font-family: 'Courier New', monospace;
+      z-index: 300;
+      overflow: hidden;
+    }
+    #balance-menu.hidden, #debug-menu.hidden { display: none; }
+
+    .bm-header {
+      flex-shrink: 0;
+      padding: 18px 28px 12px;
+      border-bottom: 1px solid #333;
+      background: rgba(0,0,0,0.6);
+    }
+    .bm-header h1 {
+      font-size: 22px;
+      letter-spacing: 6px;
+      color: #ff9944;
+      text-shadow: 0 0 12px #ff6600;
+      margin-bottom: 4px;
+    }
+    .bm-hint { font-size: 10px; color: #555; letter-spacing: 2px; margin-bottom: 10px; }
+    .bm-btn-row { display: flex; gap: 10px; }
+    .bm-btn {
+      padding: 5px 14px;
+      background: transparent;
+      color: #e8d090;
+      border: 1px solid #555;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      letter-spacing: 2px;
+      cursor: pointer;
+    }
+    .bm-btn:hover { border-color: #ff9944; color: #ff9944; }
+    .bm-btn.reset { color: #ff6666; border-color: #ff6666; }
+    .bm-btn.reset:hover { background: rgba(255,80,80,0.1); }
+
+    /* Balance menu: 3-column scrollable body */
+    .bm-body {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .bm-col {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      border-right: 1px solid #1a1a1a;
+    }
+    .bm-col:last-child { border-right: none; }
+
+    /* Debug menu: single scrollable column */
+    .debug-body {
+      display: block;
+      overflow-y: auto;
+      padding: 14px 28px;
+      columns: 2;
+      column-gap: 28px;
+    }
+
+    .bm-section {
+      break-inside: avoid;
+      margin-bottom: 18px;
+    }
+    .bm-section-title {
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: #ff9944;
+      border-bottom: 1px solid #2a2a2a;
+      padding-bottom: 4px;
+      margin-bottom: 8px;
+    }
+    .bm-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+    }
+    .bm-label {
+      width: 88px;
+      font-size: 10px;
+      color: #aaa;
+      flex-shrink: 0;
+    }
+    .bm-slider {
+      flex: 1;
+      height: 3px;
+      accent-color: #ff8800;
+      cursor: pointer;
+    }
+    .bm-val {
+      width: 36px;
+      text-align: right;
+      font-size: 11px;
+      color: #e8d090;
+      flex-shrink: 0;
+    }
+    .debug-item-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin-bottom: 4px;
+      padding: 4px 10px;
+      font-size: 11px;
+      letter-spacing: 1px;
+    }
+
+    /* E-prompt — weapon pickup interaction hint */
+    #e-prompt {
+      position: fixed;
+      bottom: 36%;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(0,0,0,0.72);
+      border: 1px solid #888;
+      padding: 5px 14px;
+      pointer-events: none;
+      z-index: 20;
+      white-space: nowrap;
+    }
+    #e-prompt.hidden { display: none; }
+    .e-key {
+      font-size: 13px;
+      font-weight: bold;
+      color: #fff;
+      background: #555;
+      border: 1px solid #888;
+      padding: 1px 6px;
+      letter-spacing: 1px;
+    }
+    #e-prompt-text {
+      font-size: 12px;
+      color: #e8d090;
+      letter-spacing: 2px;
+    }
+
+    /* Weapon slots strip — replaces old weapon/ammo boxes */
+    #hud-bottom { display: none; } /* hidden: replaced by #weapon-slots */
+    #weapon-slots {
+      position: absolute;
+      bottom: 24px;
+      right: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: stretch;
+    }
+    .wslot {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(0,0,0,0.55);
+      border: 1px solid #333;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #666;
+      min-width: 168px;
+      transition: border-color 0.1s, color 0.1s;
+      font-family: 'Courier New', monospace;
+    }
+    .wslot.active { border-color: #ff8800; color: #e8d090; }
+    .wslot-key  { width: 20px; color: #555; letter-spacing: 0; }
+    .wslot.active .wslot-key { color: #ff8800; }
+    .wslot-name { width: 24px; font-weight: bold; }
+    .wslot-bar-bg {
+      flex: 1;
+      height: 4px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+    }
+    .wslot-bar-fill { height: 100%; transition: width 0.12s, background 0.2s; }
+    .wslot-ammo { width: 46px; text-align: right; font-size: 10px; }
+
+    /* Skill cooldown bar */
+    #hud-skill {
+      position: absolute;
+      bottom: 108px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid #444;
+      padding: 5px 14px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #skill-label { font-size: 10px; color: #aaa; letter-spacing: 2px; }
+    #skill-cd-bg {
+      width: 88px; height: 4px;
+      background: #222; border: 1px solid #444;
+      margin: 4px auto 2px;
+    }
+    #skill-cd-fill { height: 100%; background: #88cc44; transition: width 0.1s; }
+    #skill-cd-text { font-size: 10px; color: #888; letter-spacing: 1px; }
+
+    /* Pickup notification */
+    #pickup-feed {
+      position: fixed;
+      bottom: 110px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .pickup-entry {
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      margin-bottom: 2px;
+      text-shadow: 0 0 8px currentColor;
+      animation: fadePickup 1.5s forwards;
+    }
+    @keyframes fadePickup {
+      0%   { opacity: 0; transform: translateY(0); }
+      15%  { opacity: 1; }
+      70%  { opacity: 1; transform: translateY(-12px); }
+      100% { opacity: 0; transform: translateY(-22px); }
+    }
+
+    /* Combo display */
+    #combo-display {
+      position: fixed; top: 50%; right: 40px;
+      transform: translateY(-50%);
+      text-align: right;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #combo-count {
+      font-size: 48px;
+      color: #ff9944;
+      text-shadow: 0 0 15px #ff6600;
+      font-weight: bold;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #combo-count.show { opacity: 1; }
+    #combo-label { font-size: 11px; color: #888; letter-spacing: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- Balance Menu -->
+<div id="balance-menu" class="hidden"></div>
+
+<!-- Debug / Cheat Menu -->
+<div id="debug-menu" class="hidden"></div>
+
+<!-- Character Select Screen -->
+<div id="char-select" class="screen">
+  <h1>SHOOTER SURVIVOR</h1>
+  <h2>SELECT OPERATIVE</h2>
+  <div class="char-cards" id="char-cards-container"></div>
+  <button id="start-btn">DEPLOY</button>
+</div>
+
+<!-- Upgrade Menu -->
+<div id="upgrade-menu" class="screen hidden">
+  <h1>LEVEL UP</h1>
+  <h2>CHOOSE AN UPGRADE</h2>
+  <div class="upgrade-cards" id="upgrade-cards-container"></div>
+</div>
+
+<!-- Game Over Screen -->
+<div id="game-over" class="screen hidden">
+  <h1>YOU DIED</h1>
+  <div class="stats-summary" id="game-over-stats"></div>
+  <button id="restart-btn">PLAY AGAIN</button>
+</div>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="hud-top">
+    <div class="hud-top-item">WAVE <strong id="hud-wave">1</strong></div>
+    <div class="hud-top-item">KILLS <strong id="hud-kills">0</strong></div>
+    <div class="hud-top-item">SCORE <strong id="hud-score">0</strong></div>
+  </div>
+
+  <div id="weapon-slots"></div>
+
+  <div id="hud-skill" style="display:none">
+    <div id="skill-label">F — GRENADE</div>
+    <div id="skill-cd-bg"><div id="skill-cd-fill" style="width:100%"></div></div>
+    <div id="skill-cd-text">READY</div>
+  </div>
+
+  <div id="hud-bars">
+    <div class="bar-row">
+      <span class="bar-label">HP</span>
+      <div class="bar-bg"><div class="bar-fill hp" id="bar-hp" style="width:100%"></div></div>
+      <span id="txt-hp" style="font-size:11px;color:#aaa;min-width:36px">150/150</span>
+    </div>
+    <div class="bar-row">
+      <span class="bar-label" style="color:#4499ff">AR</span>
+      <div class="bar-bg"><div class="bar-fill armor" id="bar-armor" style="width:100%"></div></div>
+      <span id="txt-armor" style="font-size:11px;color:#aaa;min-width:36px">50/50</span>
+    </div>
+  </div>
+
+  <div id="hud-bottom">
+    <div class="hud-box">
+      <div class="hud-label">Weapon</div>
+      <div class="hud-value orange" id="hud-weapon">SHOTGUN</div>
+    </div>
+    <div class="hud-box">
+      <div class="hud-label">Ammo</div>
+      <div class="hud-value" id="hud-ammo">8 / 64</div>
+    </div>
+  </div>
+</div>
+
+<div id="e-prompt" class="hidden">
+  <span class="e-key">E</span>
+  <span id="e-prompt-text"></span>
+</div>
+
+<div id="crosshair"></div>
+<div id="hit-marker"></div>
+<div id="damage-vignette"></div>
+<div id="wave-announce"></div>
+<div id="kill-feed"></div>
+<div id="pickup-feed"></div>
+<div id="combo-display">
+  <div id="combo-count"></div>
+  <div id="combo-label">KILL STREAK</div>
+</div>
+<div id="lock-prompt">CLICK TO PLAY</div>
+
+<!-- Phase 1 debug overlay — remove in Phase 5 -->
+<pre id="debug-overlay" style="
+  position:fixed; top:8px; left:8px;
+  color:#0f0; font-size:11px; line-height:1.6;
+  pointer-events:none; z-index:50;
+  text-shadow: 1px 1px 2px #000;
+"></pre>
+
+<canvas id="canvas"></canvas>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
