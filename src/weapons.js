@@ -18,6 +18,7 @@ export const WEAPON_DEFS = {
     name: 'SHOTGUN',
     shortName: 'SG',
     type: 'hitscan',
+    hitColor: '#ff6622',
     damage: 15,         // per pellet
     pellets: 7,
     spread: 0.08,       // radians
@@ -26,6 +27,7 @@ export const WEAPON_DEFS = {
     magSize: 8,
     reserveAmmo: 64,
     range: 40,
+    fullDamageRange: 8,   // full damage within 8m, falloff to 30% at max range
     knockback: 3,
   },
   railgun: {
@@ -33,6 +35,7 @@ export const WEAPON_DEFS = {
     name: 'RAILGUN',
     shortName: 'RG',
     type: 'hitscan',
+    hitColor: '#44eeff',
     damage: 120,
     pellets: 1,
     spread: 0,
@@ -69,6 +72,7 @@ export const WEAPON_DEFS = {
     name: 'MACHINE GUN',
     shortName: 'MG',
     type: 'hitscan',
+    hitColor: '#ffdd44',
     damage: 12,
     pellets: 1,
     spread: 0.045,

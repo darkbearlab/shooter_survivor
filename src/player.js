@@ -23,10 +23,15 @@ export class Player {
     this.maxHp    = s.maxHp;
     this.hp       = s.maxHp;
     this.maxArmor = s.maxArmor;
-    this.armor    = s.maxArmor;
+    // Quake-style loadout: startArmor = 0. Classic chars start full.
+    this.armor    = character.startArmor ?? s.maxArmor;
     this.speedMult          = s.moveSpeed;
     this.damageMultiplier   = s.damageMultiplier;
     this.reloadMultiplier   = s.reloadMultiplier;
+
+    // HP regen (loadout passive: positive = heal, negative = drain)
+    this._hpRegenRate  = s.hpRegen ?? 0;
+    this._hpRegenTimer = 5;
 
     // Feet position in world space
     this.position = new THREE.Vector3(0, 0, 0);
@@ -40,6 +45,16 @@ export class Player {
     const weaponIds  = (character.startingWeapons ?? [character.startingWeapon ?? 'shotgun'])
                          .slice(0, this.MAX_WEAPON_SLOTS);
     this.weapons     = weaponIds.map(id => new WeaponState(id));
+
+    // Loadout reserve multiplier — scale all weapon reserves at creation
+    const reserveMult = s.reserveMult ?? 1.0;
+    if (reserveMult !== 1.0) {
+      for (const w of this.weapons) {
+        if (w.def.type === 'melee') continue;
+        w.reserve = Math.max(1, Math.round(w.reserve * reserveMult));
+        w.def = { ...w.def, reserveAmmo: Math.max(1, Math.round(w.def.reserveAmmo * reserveMult)) };
+      }
+    }
     this.weaponSlot  = 0;
     this.isFiring    = false;
 
@@ -89,6 +104,12 @@ export class Player {
   // Convenience getter — always points to current slot
   get weapon() { return this.weapons[this.weaponSlot]; }
 
+  // Check a passive id — works for both classic single-passive and loadout passiveIds array
+  _hasPassive(id) {
+    if (Array.isArray(this.character.passiveIds)) return this.character.passiveIds.includes(id);
+    return this.character.passive?.id === id;
+  }
+
   switchWeapon(slot) {
     if (slot >= 0 && slot < this.weapons.length) this.weaponSlot = slot;
   }
@@ -117,6 +138,19 @@ export class Player {
 
   update(dt) {
     if (!this.alive) return;
+
+    // HP regen/drain (loadout passive)
+    if (this._hpRegenRate !== 0) {
+      this._hpRegenTimer -= dt;
+      if (this._hpRegenTimer <= 0) {
+        this._hpRegenTimer = 5;
+        if (this._hpRegenRate > 0) {
+          this.healHp(this._hpRegenRate);
+        } else {
+          this.hp = Math.max(1, this.hp + this._hpRegenRate);
+        }
+      }
+    }
 
     // Armor regen passive
     if (this.upgrades.armorRegen) {
@@ -287,7 +321,7 @@ export class Player {
   _getFinalDamage() {
     let mult = this.damageMultiplier * (1 + this.upgrades.damageBonus);
     if (this.weapon._dmgBonus) mult *= (1 + this.weapon._dmgBonus);
-    if (this.character.passive.id === 'combat_instinct' && this.nextShotDouble) mult *= 2;
+    if (this._hasPassive('combat_instinct') && this.nextShotDouble) mult *= 2;
     if (this.upgrades.lastStand && this.hp / this.maxHp < 0.25) mult *= 1.4;
     return mult;
   }
@@ -305,7 +339,7 @@ export class Player {
   takeDamage(amount) {
     if (!this.alive || this.godMode) return;
     if (this.armor > 0) {
-      const rate   = this.character.passive.id === 'heavy_armor' ? 0.80 : 0.67;
+      const rate   = this._hasPassive('heavy_armor') ? 0.80 : 0.67;
       const absorb = Math.min(this.armor, amount * rate);
       this.armor  -= absorb;
       amount      -= absorb;
@@ -322,7 +356,7 @@ export class Player {
   onKill() {
     this.totalKills++;
     this.score += 100;
-    if (this.character.passive.id === 'combat_instinct') {
+    if (this._hasPassive('combat_instinct')) {
       this.killStreak++;
       if (this.killStreak >= 3) { this.nextShotDouble = true; this.killStreak = 0; }
     }

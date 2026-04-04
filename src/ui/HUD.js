@@ -17,6 +17,15 @@ export class HUD {
     this._pickupFeed  = document.getElementById('pickup-feed');
     this._weaponSlots = document.getElementById('weapon-slots');
     this._slotEls     = []; // cached per-slot DOM elements
+
+    // Ammo ring around crosshair
+    this._ammoRing      = document.getElementById('ammo-ring');
+    this._ammoRingFill  = document.getElementById('ammo-ring-fill');
+    // SVG circle r=26 → circumference = 2π×26 ≈ 163.36
+    this._ringCirc      = 2 * Math.PI * 26;
+    this._ammoRingFill.style.strokeDasharray  = this._ringCirc;
+    this._ammoRingFill.style.strokeDashoffset = 0;
+
     this._skillBox    = document.getElementById('hud-skill');
     this._skillLabel  = document.getElementById('skill-label');
     this._skillCdFill = document.getElementById('skill-cd-fill');
@@ -167,6 +176,29 @@ export class HUD {
                               : '#aa2222';
       }
     });
+
+    // ── Ammo ring around crosshair ────────────────────────────────────────────
+    const aw = weapons[activeSlot];
+    const ring = this._ammoRing;
+    if (!aw || aw.type === 'melee' || aw.magSize === 0) {
+      // Infinite / melee — hide ring
+      ring.classList.add('hidden-ring');
+    } else {
+      ring.classList.remove('hidden-ring');
+      if (aw.reloading) {
+        ring.classList.remove('empty');
+        ring.classList.add('reload');
+        // Arc fills in as reload progresses
+        this._ammoRingFill.style.strokeDashoffset =
+          (this._ringCirc * (1 - aw.reloadPct)).toFixed(2);
+      } else {
+        ring.classList.remove('reload');
+        const ammoPct = aw.magSize > 0 ? aw.ammo / aw.magSize : 1;
+        ring.classList.toggle('empty', aw.ammo === 0);
+        this._ammoRingFill.style.strokeDashoffset =
+          (this._ringCirc * (1 - ammoPct)).toFixed(2);
+      }
+    }
   }
 
   showPickup(type, amount, weaponId) {

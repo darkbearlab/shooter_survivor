@@ -23,6 +23,8 @@ import { CharacterSelect }   from './ui/CharacterSelect.js';
 import { BalanceMenu }       from './ui/BalanceMenu.js';
 import { DebugMenu }         from './ui/DebugMenu.js';
 import { MapSelect }         from './ui/MapSelect.js';
+import { LoadoutSelect }     from './ui/LoadoutSelect.js';
+import { BossBar }           from './ui/BossBar.js';
 // import { WeaponViewModel }   from './ui/WeaponViewModel.js'; // disabled
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
@@ -58,8 +60,12 @@ let hud          = null;
 let upgradeMenu  = null;
 let balanceMenu  = null;
 let debugMenu    = null;
+let bossBar      = null;
+let _bossTracking = false; // true while a boss is alive and bar is showing
 // let viewmodel    = null; // disabled
-let gameState    = 'title'; // 'title' | 'char_select' | 'playing' | 'upgrading' | 'between_waves' | 'dead'
+let gameState    = 'title'; // 'title' | 'char_select' | 'loadout_select' | 'playing' | 'upgrading' | 'between_waves' | 'dead'
+let _loadoutDropMods = null; // applied drop overrides from loadout — restored on game end
+let _respawnPos  = null;   // THREE.Vector3 — player start position
 let paused       = false;
 let waveCheckCooldown = 0;
 let lastTime     = 0;
@@ -106,54 +112,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── Enemy Outlines ────────────────────────────────────────────────────────────
-
-const outlineContainer = document.createElement('div');
-outlineContainer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:15;overflow:hidden;';
-document.body.appendChild(outlineContainer);
-
-const _wp  = new THREE.Vector3();
-const _prj = new THREE.Vector3();
-
-function updateEnemyOutlines() {
-  if (!waveManager) return;
-  const alive = waveManager.enemies;
-
-  while (outlineContainer.children.length < alive.length) {
-    const el = document.createElement('div');
-    el.style.cssText = 'position:absolute;border:2px solid;pointer-events:none;box-sizing:border-box;';
-    outlineContainer.appendChild(el);
-  }
-  for (let i = 0; i < outlineContainer.children.length; i++) {
-    outlineContainer.children[i].style.display = i < alive.length ? 'block' : 'none';
-  }
-
-  const W = window.innerWidth, H = window.innerHeight;
-  const tanHFov = Math.tan(camera.fov * Math.PI / 360);
-
-  alive.forEach((e, i) => {
-    const el = outlineContainer.children[i];
-    _wp.set(e.pos.x, e.pos.y + e.hbH * 0.5, e.pos.z);
-    _prj.copy(_wp).project(camera);
-
-    if (_prj.z > 1) { el.style.display = 'none'; return; }
-
-    const sx  = ( _prj.x * 0.5 + 0.5) * W;
-    const sy  = (-_prj.y * 0.5 + 0.5) * H;
-    const d   = camera.position.distanceTo(_wp);
-    const pxH = Math.max(20, Math.min(220, (e.hbH / d) * (H / (2 * tanHFov))));
-    const pxW = pxH * 0.5;
-    const cx  = Math.max(2, Math.min(W - pxW - 2, sx - pxW / 2));
-    const cy  = Math.max(2, Math.min(H - pxH - 2, sy - pxH / 2));
-
-    const pct = e.hp / e.maxHp;
-    const r = 255, g = Math.round(pct * 180);
-    el.style.borderColor = `rgba(${r},${g},50,0.85)`;
-    el.style.boxShadow   = `0 0 6px rgba(${r},${g},50,0.5)`;
-    el.style.left = cx + 'px'; el.style.top  = cy + 'px';
-    el.style.width = pxW + 'px'; el.style.height = pxH + 'px';
-  });
-}
 
 // ── Muzzle Flash ──────────────────────────────────────────────────────────────
 
@@ -298,11 +256,13 @@ function handleShooting() {
       hits.sort((a, b) => a.d - b.d);
 
       let hitAny = false;
-      for (const { e } of hits) {
+      for (const { e, d } of hits) {
         const survived = e.takeDamage(def.damage * dmgMult);
         if (!survived) { player.onKill(); hud.showKill(e.type); }
         player.onHit();
         hitAny = true;
+        const hitPos = origin.clone().addScaledVector(direction, d);
+        projSystem._spawnHitSpark(hitPos, def.hitColor ?? '#44eeff', def.damage * dmgMult);
       }
 
       spawnRailBeam(origin, beamEnd);
@@ -332,16 +292,28 @@ function handleShooting() {
         if (closestEnemy) {
           const wallDist = collision.raycast(origin, dir, closestDist);
           if (wallDist >= closestDist) {
-            const survived = closestEnemy.takeDamage(def.damage * dmgMult);
+            // Distance falloff — full damage within fullDamageRange, linear to 30% at max range
+            let falloff = 1;
+            if (def.fullDamageRange && closestDist > def.fullDamageRange) {
+              const maxRange = def.range ?? 100;
+              const t = Math.min((closestDist - def.fullDamageRange) / (maxRange - def.fullDamageRange), 1);
+              falloff = 1 - t * 0.70; // 1.0 → 0.30
+            }
+            const survived = closestEnemy.takeDamage(def.damage * dmgMult * falloff);
             hitEnemy = true;
             player.onHit();
             if (!survived) { player.onKill(); hud.showKill(closestEnemy.type); }
+
+            // Hit spark at impact point
+            const hitPos = origin.clone().addScaledVector(dir, closestDist);
+            projSystem._spawnHitSpark(hitPos, def.hitColor ?? '#ff4400', def.damage * dmgMult * falloff);
 
             // Explosive Rounds: small AoE around hit point
             if (player.upgrades.explosiveRounds) {
               const hitPos = origin.clone().addScaledVector(dir, closestDist);
               const splashR = 1.5;
               const splashDmg = def.damage * dmgMult * 0.20;
+              projSystem._explode(hitPos, '#ffaa44', splashR);
               for (const e of waveManager.enemies) {
                 if (!e.alive || e === closestEnemy) continue;
                 const d = hitPos.distanceTo(new THREE.Vector3(e.pos.x, e.pos.y + e.hbH * 0.5, e.pos.z));
@@ -447,7 +419,7 @@ function handleShooting() {
         };
       } else {
         // Direct-hit weapon (nail gun, etc.) — single target damage on contact
-        spawnCfg.onHit = (hitPos, hitEnemy) => {
+        spawnCfg.onHit = (_hitPos, hitEnemy) => {
           if (hitEnemy) {
             const survived = hitEnemy.takeDamage(def.damage * dmgMult);
             if (!survived) { player.onKill(); hud.showKill(hitEnemy.type); }
@@ -509,6 +481,11 @@ function handleSkill() {
       },
     });
   }
+
+  if (skill.skillId === 'pulse') {
+    const PULSE_RADIUS = 8;
+    projSystem.pulseBlast(player.position.clone(), PULSE_RADIUS);
+  }
 }
 
 // ── E-prompt ──────────────────────────────────────────────────────────────────
@@ -560,6 +537,7 @@ const AMMO_AMOUNTS = { shotgun: 16, rocket: 4, railgun: 8 };
 const DROP_CHANCE  = {
   soldier: 0.35, rusher: 0.25, ranged: 0.40, boss: 1.0,
   molotov: 0.35, trishot: 0.35, sniper: 0.50, tank: 0.85,
+  boss_rocketeer: 1.0, boss_charger: 1.0, boss_dasher: 1.0,
   guerrilla: 0.50, drone_gun: 0.30, drone_bomb: 0.20,
 };
 
@@ -596,13 +574,59 @@ function onEnemyDeath(pos, enemyType) {
 
 // ── Enemy ranged projectile callback ─────────────────────────────────────────
 
-function onEnemyFireProjectile(enemy) {
+function onEnemyFireProjectile(enemy, data) {
   const origin = new THREE.Vector3(enemy.pos.x, enemy.pos.y + enemy.hbH * 0.6, enemy.pos.z);
   const toPlayer = new THREE.Vector3(
     player.position.x - enemy.pos.x,
     player.position.y + 0.9 - origin.y,
     player.position.z - enemy.pos.z,
   ).normalize();
+
+  // ── Boss rocketeer: fan of 5 rockets aimed at player feet ────────────────
+  if (data?.type === 'boss_rocket') {
+    const splashRadius = 4.5, splashDmg = enemy.def.damage, push = 15;
+    // Compute base direction toward player feet (y = 0)
+    const toFeet = new THREE.Vector3(
+      player.position.x - origin.x,
+      -origin.y,               // feet at y = 0
+      player.position.z - origin.z,
+    ).normalize();
+    const baseAngle = Math.atan2(toFeet.z, toFeet.x);
+
+    const SPREAD_DEG = [-24, -12, 0, 12, 24];
+    for (const deg of SPREAD_DEG) {
+      const a = baseAngle + deg * Math.PI / 180;
+      // Preserve the pitch from toFeet, fan only in horizontal plane
+      const hLen = Math.sqrt(toFeet.x * toFeet.x + toFeet.z * toFeet.z);
+      const dir = new THREE.Vector3(
+        Math.cos(a) * hLen,
+        toFeet.y,
+        Math.sin(a) * hLen,
+      ).normalize();
+      projSystem.spawn({
+        owner: 'enemy', origin: origin.clone(), direction: dir,
+        speed: 14, damage: enemy.def.damage,
+        splashRadius, splashDamage: splashDmg, splashPush: push,
+        color: '#ff4400', scaleX: 0.45, scaleY: 0.45, minTravel: 0.8,
+        onSplash: (pos, radius, sDmg) => {
+          const d = pos.distanceTo(camera.position);
+          if (d < radius) {
+            const falloff = 1 - d / radius;
+            projSystem._pendingPlayerHits.push(sDmg * falloff);
+            hud.flashDamage();
+            const pushDir = camera.position.clone().sub(pos);
+            if (pushDir.lengthSq() < 0.001) pushDir.set(0, 1, 0);
+            pushDir.normalize();
+            pushDir.y = Math.max(pushDir.y, 0.3);
+            pushDir.normalize();
+            player.velocity.addScaledVector(pushDir, push * falloff);
+            player.onGround = false;
+          }
+        },
+      });
+    }
+    return;
+  }
 
   // ── Molotov: arc bomb that creates a fire zone on impact ──────────────────
   if (enemy.type === 'molotov') {
@@ -723,6 +747,41 @@ function onEnemySpecialAttack(enemy, data) {
     spawnSniperBeam(from, beamEnd);
   }
 
+  else if (data.type === 'boss_railgun') {
+    const { from, aimTarget } = data;
+    const dir = aimTarget.clone().sub(from).normalize();
+
+    const wallDist = collision.raycast(from, dir, 200);
+
+    // Ray vs player AABB
+    const R = 0.5, H = 1.7;
+    const pp = player.position;
+    let tmin = -Infinity, tmax = Infinity;
+    let blocked = false;
+    for (const [o, d, lo, hi] of [
+      [from.x, dir.x, pp.x - R, pp.x + R],
+      [from.y, dir.y, pp.y,     pp.y + H],
+      [from.z, dir.z, pp.z - R, pp.z + R],
+    ]) {
+      if (Math.abs(d) < 1e-8) {
+        if (o < lo || o > hi) { blocked = true; break; }
+      } else {
+        const t1 = (lo - o) / d, t2 = (hi - o) / d;
+        tmin = Math.max(tmin, Math.min(t1, t2));
+        tmax = Math.min(tmax, Math.max(t1, t2));
+      }
+    }
+    if (!blocked && tmax >= 0 && tmin <= tmax) {
+      const hitDist = tmin < 0 ? tmax : tmin;
+      if (hitDist < wallDist) {
+        player.takeDamage(enemy.def.damage);
+        hud.flashDamage();
+      }
+    }
+    const beamEnd = from.clone().addScaledVector(dir, Math.min(wallDist, 150));
+    spawnRailBeam(from, beamEnd);
+  }
+
   else if (data.type === 'kamikaze') {
     const pos    = data.pos;
     const radius = 4, damage = enemy.def.damage;
@@ -740,7 +799,7 @@ function onEnemySpecialAttack(enemy, data) {
       player.onGround = false;
     }
     // Visual explosion and remove drone
-    projSystem._explode(pos, '#ff3300');
+    projSystem._explode(pos, '#ff3300', radius);
     enemy.die();
   }
 }
@@ -783,6 +842,12 @@ function checkWaveEnd() {
         waveManager.startWave();
         const isBoss = waveManager.wave % 5 === 0;
         hud.showWaveAnnouncement(waveManager.wave, isBoss);
+        if (isBoss) {
+          const bossType = waveManager.pendingBossType ?? 'boss';
+          const bdef = ENEMY_DEFS[bossType];
+          bossBar.show(bdef.displayName ?? 'BOSS');
+          _bossTracking = true;
+        }
         gameState = 'playing';
       }, 1500);
     }, playerState);
@@ -797,8 +862,8 @@ function triggerGameOver() {
   paused    = true;
   document.exitPointerLock();
   hud.hide();
+  if (bossBar && _bossTracking) { bossBar.hide(); _bossTracking = false; }
 
-  // Save score
   SaveSystem.saveScore({
     charId:   player.character.id,
     charName: player.character.name,
@@ -806,12 +871,9 @@ function triggerGameOver() {
     kills:    player.totalKills,
     score:    player.score,
   });
-
-  // Check if this run is a new personal best for this character
-  const best    = SaveSystem.getBestForChar(player.character.id);
+  const best     = SaveSystem.getBestForChar(player.character.id);
   const isNewBest = best && best.score === player.score &&
                     best.date === SaveSystem.getScores()[0]?.date;
-
   document.getElementById('game-over-stats').innerHTML =
     `<strong>Wave Reached:</strong> ${waveManager.wave}<br>` +
     `<strong>Total Kills:</strong> ${player.totalKills}<br>` +
@@ -821,6 +883,16 @@ function triggerGameOver() {
 }
 
 document.getElementById('restart-btn').addEventListener('click', () => location.reload());
+
+const _respawnBtn = document.getElementById('respawn-btn');
+_respawnBtn.addEventListener('click', () => {
+  if (!player || !_respawnPos) return;
+  player.position.copy(_respawnPos);
+  player.velocity.set(0, 0, 0);
+  player.onGround = true;
+  _respawnBtn.style.display = 'none';
+  document.getElementById('game-canvas')?.requestPointerLock?.();
+});
 
 // ── Debug ─────────────────────────────────────────────────────────────────────
 
@@ -900,6 +972,24 @@ function gameLoop(time) {
 
   if (!player.alive) { triggerGameOver(); return; }
 
+  // Show respawn button when player falls out of the world (y < -3)
+  if (player.position.y < -3) {
+    _respawnBtn.style.display = 'block';
+  }
+
+
+  // Boss bar HP tracking
+  if (_bossTracking && bossBar) {
+    const boss = waveManager.enemies.find(e => e.def?.isBossType);
+    if (boss) {
+      bossBar.setHp(boss.hp / boss.maxHp);
+    } else {
+      // Boss was pruned from enemies list (died this frame)
+      bossBar.hide();
+      _bossTracking = false;
+    }
+  }
+
   checkWaveEnd();
   hud.update(dt, player.getHUDState(), waveManager.wave);
   updateMuzzle(dt);
@@ -909,7 +999,6 @@ function gameLoop(time) {
   updateDebug();
 
   renderer.render(scene, camera);
-  updateEnemyOutlines();
 }
 
 // Enemy projectile hit — ProjectileSystem removes the projectile when it hits player,
@@ -930,7 +1019,13 @@ function _applyEnemyProjectileHits(_dt) {
 
 // ── Start Game ────────────────────────────────────────────────────────────────
 
-function startGame(charId, mapData = null) {
+function startGame(charIdOrDef, mapData = null) {
+  // Restore any drop mods from a previous loadout run
+  if (_loadoutDropMods) {
+    for (const [k, v] of Object.entries(_loadoutDropMods)) DROP_SETTINGS[k] -= v;
+    _loadoutDropMods = null;
+  }
+
   // Clear scene geometry except lights (rebuild)
   while (scene.children.length > 0) scene.remove(scene.children[0]);
 
@@ -939,10 +1034,17 @@ function startGame(charId, mapData = null) {
   scene.add(arena.build());
   collision = new CollisionSystem(arena.getColliders(), arena.wallHeight ?? 6);
 
-  // Player
-  const charDef = getCharacter(charId);
+  // Player — accept either a charId string (classic) or a pre-built charDef (loadout)
+  const charDef = (typeof charIdOrDef === 'string') ? getCharacter(charIdOrDef) : charIdOrDef;
+
+  // Apply loadout drop modifiers on top of current DROP_SETTINGS
+  if (charDef.dropMods) {
+    for (const [k, v] of Object.entries(charDef.dropMods)) DROP_SETTINGS[k] += v;
+    _loadoutDropMods = charDef.dropMods;
+  }
+  _respawnPos = arena.getPlayerStart();
   player = new Player(charDef, camera, collision);
-  player.position.copy(arena.getPlayerStart());
+  player.position.copy(_respawnPos);
 
   // Systems
   projSystem    = new ProjectileSystem(scene, collision);
@@ -989,6 +1091,8 @@ function startGame(charId, mapData = null) {
   // UI
   hud         = new HUD();
   upgradeMenu = new UpgradeMenu();
+  bossBar     = new BossBar();
+  _bossTracking = false;
   // Balance/debug menus are created once and reused across games
   if (!balanceMenu) balanceMenu = new BalanceMenu();
   if (!debugMenu)   debugMenu   = new DebugMenu();
@@ -1037,6 +1141,37 @@ function startGame(charId, mapData = null) {
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
+function showLoadoutSelect() {
+  document.getElementById('title-screen').classList.add('hidden');
+  gameState = 'loadout_select';
+
+  const loadoutSelect = new LoadoutSelect();
+  const mapSelect     = new MapSelect();
+
+  const backToTitle = () => { loadoutSelect.hide(); showTitle(); };
+
+  function goToMapSelect(charDef, dropMods) {
+    document.getElementById('loadout-select').classList.add('hidden');
+    gameState = 'map_select';
+    if (dropMods) charDef.dropMods = dropMods;
+    mapSelect.show(
+      () => {
+        // Back from map select → return to loadout
+        gameState = 'loadout_select';
+        loadoutSelect.show(backToTitle, goToMapSelect);
+      },
+      (mapData) => startGame(charDef, mapData),
+    );
+  }
+
+  loadoutSelect.show(backToTitle, goToMapSelect);
+}
+
+function showTitle() {
+  document.getElementById('title-screen').classList.remove('hidden');
+  gameState = 'title';
+}
+
 function showCharSelect() {
   document.getElementById('title-screen').classList.add('hidden');
   gameState = 'char_select';
@@ -1062,8 +1197,9 @@ function showCharSelect() {
 }
 
 // Boot render loop (title + char select — scene empty but renderer ticks)
-requestAnimationFrame(function bootLoop(t) {
-  if (gameState === 'title' || gameState === 'char_select' || gameState === 'map_select') {
+requestAnimationFrame(function bootLoop(_t) {
+  if (gameState === 'title' || gameState === 'char_select' ||
+      gameState === 'loadout_select' || gameState === 'map_select') {
     requestAnimationFrame(bootLoop);
     renderer.render(scene, camera);
   }
@@ -1092,5 +1228,6 @@ requestAnimationFrame(function bootLoop(t) {
   if (saved.drops) Object.assign(DROP_SETTINGS, saved.drops);
 })();
 
-// Title screen button
+// Title screen buttons
 document.getElementById('title-start-btn').addEventListener('click', showCharSelect);
+document.getElementById('title-loadout-btn').addEventListener('click', showLoadoutSelect);

@@ -66,6 +66,28 @@ function getParticleTex() {
   return _particleTex;
 }
 
+let _ringTex = null;
+function getRingTex() {
+  if (_ringTex) return _ringTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const cx = 32, outerR = 31, innerR = 20;
+  const gOut = ctx.createRadialGradient(cx, cx, innerR, cx, cx, outerR);
+  gOut.addColorStop(0,   'rgba(255,255,255,0)');
+  gOut.addColorStop(0.15,'rgba(255,255,255,1)');
+  gOut.addColorStop(0.75,'rgba(255,255,255,1)');
+  gOut.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = gOut;
+  ctx.beginPath();
+  ctx.arc(cx, cx, outerR, 0, Math.PI * 2);
+  ctx.arc(cx, cx, innerR, 0, Math.PI * 2, true);
+  ctx.fill('evenodd');
+  _ringTex = new THREE.CanvasTexture(c);
+  _ringTex.magFilter = THREE.LinearFilter;
+  return _ringTex;
+}
+
 const GRENADE_TEX = makeGrenadeTex();
 
 // ── GrenadeSystem ─────────────────────────────────────────────────────────────
@@ -78,8 +100,9 @@ export class GrenadeSystem {
   constructor(scene, collision) {
     this.scene     = scene;
     this.collision = collision;
-    this.grenades  = [];
-    this.particles = [];
+    this.grenades   = [];
+    this.particles  = [];
+    this.shockwaves = [];
   }
 
   /**
@@ -195,7 +218,7 @@ export class GrenadeSystem {
       // ── Detonate ─────────────────────────────────────────────────────────────
       if (g.fuse <= 0) {
         if (g.onExplode) g.onExplode(g.pos.clone(), g.radius, g.damage, g.owner);
-        this._explode(g.pos);
+        this._explode(g.pos, g.radius);
         this._removeGrenade(i);
       }
     }
@@ -213,26 +236,78 @@ export class GrenadeSystem {
         this.particles.splice(i, 1);
       }
     }
+
+    // ── Shockwave billboard rings ──────────────────────────────────────────────
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const sw = this.shockwaves[i];
+      sw.t += dt;
+      const frac = Math.max(0, Math.min(sw.t / sw.duration, 1));
+      const d = frac * sw.radius * 2;
+      sw.mesh.scale.set(d, d, 1);
+      sw.mesh.material.opacity = (1 - frac) * sw.maxOpacity;
+      if (frac >= 1) {
+        this.scene.remove(sw.mesh);
+        sw.mesh.material.dispose();
+        this.shockwaves.splice(i, 1);
+      }
+    }
   }
 
-  _explode(pos) {
+  _explode(pos, radius = 5) {
     const tex = getParticleTex();
-    for (let i = 0; i < 20; i++) {
-      const col   = i % 3 === 0 ? '#ffaa22' : i % 3 === 1 ? '#88cc44' : '#ffee88';
-      const mat   = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1, color: new THREE.Color(col) });
-      const s     = new THREE.Sprite(mat);
-      const sz    = 0.12 + Math.random() * 0.24;
+
+    // Central flash
+    const flashMat = new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 1,
+      color: new THREE.Color('#ffee88'),
+    });
+    const flash = new THREE.Sprite(flashMat);
+    const flashSz = 0.9 + radius * 0.2;
+    flash.scale.set(flashSz, flashSz, 1);
+    flash.position.copy(pos);
+    this.scene.add(flash);
+    this.particles.push({ mesh: flash, vel: new THREE.Vector3(0, 0.5, 0), life: 0.18, maxLife: 0.18 });
+
+    // Particle burst
+    for (let i = 0; i < 28; i++) {
+      const colHex = i % 3 === 0 ? '#ffaa22' : i % 3 === 1 ? '#88cc44' : '#ffee88';
+      const mat    = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 1, color: new THREE.Color(colHex) });
+      const s      = new THREE.Sprite(mat);
+      const sz     = 0.15 + Math.random() * 0.38;
       s.scale.set(sz, sz, 1);
       s.position.copy(pos);
       this.scene.add(s);
-      const vel  = new THREE.Vector3(
-        (Math.random() - 0.5) * 13,
-        Math.random() * 9 + 2,
-        (Math.random() - 0.5) * 13,
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 16,
+        Math.random() * 10 + 3,
+        (Math.random() - 0.5) * 16,
       );
-      const life = 0.3 + Math.random() * 0.4;
+      const life = 0.35 + Math.random() * 0.45;
       this.particles.push({ mesh: s, vel, life, maxLife: life });
     }
+
+    // Shockwave — billboard ring sprites
+    const ringTex = getRingTex();
+
+    const mat1 = new THREE.SpriteMaterial({
+      map: ringTex, transparent: true, opacity: 0.85,
+      color: new THREE.Color('#ffcc44'), depthWrite: false,
+    });
+    const ring1 = new THREE.Sprite(mat1);
+    ring1.position.copy(pos);
+    ring1.scale.set(0.01, 0.01, 1);
+    this.scene.add(ring1);
+    this.shockwaves.push({ mesh: ring1, t: 0, duration: 0.42, radius, maxOpacity: 0.85 });
+
+    const mat2 = new THREE.SpriteMaterial({
+      map: ringTex, transparent: true, opacity: 0.40,
+      color: new THREE.Color('#ffffff'), depthWrite: false,
+    });
+    const ring2 = new THREE.Sprite(mat2);
+    ring2.position.copy(pos);
+    ring2.scale.set(0.01, 0.01, 1);
+    this.scene.add(ring2);
+    this.shockwaves.push({ mesh: ring2, t: -0.06, duration: 0.35, radius: radius * 0.80, maxOpacity: 0.40 });
   }
 
   _removeGrenade(i) {
@@ -246,5 +321,10 @@ export class GrenadeSystem {
     for (let i = this.grenades.length - 1; i >= 0; i--) this._removeGrenade(i);
     this.particles.forEach(p => { this.scene.remove(p.mesh); p.mesh.material.dispose(); });
     this.particles = [];
+    this.shockwaves.forEach(sw => {
+      this.scene.remove(sw.mesh);
+      sw.mesh.material.dispose();
+    });
+    this.shockwaves = [];
   }
 }

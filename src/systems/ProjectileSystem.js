@@ -20,10 +20,33 @@ function makeCircleTex(color) {
   return t;
 }
 
+// Ring texture: white ring with soft inner/outer edges — used as billboard shockwave
+function makeRingTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const cx = 32, outerR = 31, innerR = 20;
+  // Outer soft fade (radial gradient outward)
+  const gOut = ctx.createRadialGradient(cx, cx, innerR, cx, cx, outerR);
+  gOut.addColorStop(0,   'rgba(255,255,255,0)');
+  gOut.addColorStop(0.15,'rgba(255,255,255,1)');
+  gOut.addColorStop(0.75,'rgba(255,255,255,1)');
+  gOut.addColorStop(1,   'rgba(255,255,255,0)');
+  ctx.fillStyle = gOut;
+  ctx.beginPath();
+  ctx.arc(cx, cx, outerR, 0, Math.PI * 2);
+  ctx.arc(cx, cx, innerR, 0, Math.PI * 2, true);
+  ctx.fill('evenodd');
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.LinearFilter;
+  return t;
+}
+
 const TEX = {
-  rocket:  makeCircleTex('rgba(255,140,20,1)'),
-  enemy:   makeCircleTex('rgba(255,40,40,1)'),
+  rocket:   makeCircleTex('rgba(255,140,20,1)'),
+  enemy:    makeCircleTex('rgba(255,40,40,1)'),
   particle: makeCircleTex('rgba(255,100,0,1)'),
+  ring:     makeRingTex(),
 };
 
 // ── ProjectileSystem ──────────────────────────────────────────────────────────
@@ -38,6 +61,7 @@ export class ProjectileSystem {
     this.collision = collisionSystem;
     this.projectiles = [];
     this.particles   = [];
+    this.shockwaves  = [];
   }
 
   /**
@@ -166,7 +190,7 @@ export class ProjectileSystem {
         if (p.splashRadius > 0 && p.onSplash) {
           p.onSplash(hitPos, p.splashRadius, p.splashDamage, p.owner);
         }
-        this._explode(hitPos, p.owner === 'enemy' ? '#ff3300' : '#ff8800');
+        this._explode(hitPos, p.owner === 'enemy' ? '#ff3300' : '#ff8800', p.splashRadius || 0);
         this._remove(i);
       }
     }
@@ -184,25 +208,219 @@ export class ProjectileSystem {
         this.particles.splice(i, 1);
       }
     }
+
+    // Shockwave billboard rings
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      const sw = this.shockwaves[i];
+      sw.t += dt;
+      const frac = Math.max(0, Math.min(sw.t / sw.duration, 1));
+      const d = frac * sw.radius * 2; // diameter (sprite scale = full width)
+      sw.mesh.scale.set(d, d, 1);
+      sw.mesh.material.opacity = (1 - frac) * sw.maxOpacity;
+      if (frac >= 1) {
+        this.scene.remove(sw.mesh);
+        sw.mesh.material.dispose(); // texture is shared, don't dispose it
+        this.shockwaves.splice(i, 1);
+      }
+    }
   }
 
-  _explode(pos, color = '#ff8800') {
-    for (let i = 0; i < 14; i++) {
+  _explode(pos, color = '#ff8800', radius = 0) {
+    const col = new THREE.Color(color);
+
+    // Central flash — large bright sprite that fades fast
+    const flashMat = new THREE.SpriteMaterial({
+      map: TEX.particle, transparent: true, opacity: 1,
+      color: new THREE.Color(color === '#ff3300' ? '#ff9955' : '#ffee88'),
+    });
+    const flash = new THREE.Sprite(flashMat);
+    const flashSz = 0.8 + radius * 0.25;
+    flash.scale.set(flashSz, flashSz, 1);
+    flash.position.copy(pos);
+    this.scene.add(flash);
+    this.particles.push({ mesh: flash, velocity: new THREE.Vector3(0, 0.5, 0), life: 0.18, maxLife: 0.18 });
+
+    // Particle burst — more and bigger than before
+    for (let i = 0; i < 22; i++) {
       const mat = new THREE.SpriteMaterial({
         map: TEX.particle, transparent: true, opacity: 1,
-        color: new THREE.Color(color),
+        color: col,
       });
       const s    = new THREE.Sprite(mat);
-      const size = 0.1 + Math.random() * 0.2;
+      const size = 0.15 + Math.random() * 0.35;
       s.scale.set(size, size, 1);
       s.position.copy(pos);
       this.scene.add(s);
-      const vel  = new THREE.Vector3(
-        (Math.random() - 0.5) * 10,
-        Math.random() * 6 + 2,
-        (Math.random() - 0.5) * 10,
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * 14,
+        Math.random() * 8 + 3,
+        (Math.random() - 0.5) * 14,
       );
-      const life = 0.3 + Math.random() * 0.35;
+      const life = 0.35 + Math.random() * 0.4;
+      this.particles.push({ mesh: s, velocity: vel, life, maxLife: life });
+    }
+
+    // Shockwave — billboard ring sprites, always face the camera
+    if (radius > 0.5) {
+      const accentCol = new THREE.Color(color === '#ff3300' ? '#ffaa44' : '#ffffff');
+
+      // Primary ring: expands to full radius
+      const mat1 = new THREE.SpriteMaterial({
+        map: TEX.ring, transparent: true, opacity: 0.80,
+        color: col, depthWrite: false,
+      });
+      const ring1 = new THREE.Sprite(mat1);
+      ring1.position.copy(pos);
+      ring1.scale.set(0.01, 0.01, 1);
+      this.scene.add(ring1);
+      this.shockwaves.push({ mesh: ring1, t: 0, duration: 0.38, radius, maxOpacity: 0.80 });
+
+      // Secondary ring: slightly delayed, smaller, brighter accent colour
+      const mat2 = new THREE.SpriteMaterial({
+        map: TEX.ring, transparent: true, opacity: 0.45,
+        color: accentCol, depthWrite: false,
+      });
+      const ring2 = new THREE.Sprite(mat2);
+      ring2.position.copy(pos);
+      ring2.scale.set(0.01, 0.01, 1);
+      this.scene.add(ring2);
+      this.shockwaves.push({ mesh: ring2, t: -0.06, duration: 0.32, radius: radius * 0.80, maxOpacity: 0.45 });
+    }
+  }
+
+  /**
+   * Destroy all enemy projectiles within `radius` of `center`.
+   * Spawns a blue pulse visual effect at center.
+   * Returns the number of projectiles cleared.
+   */
+  pulseBlast(center, radius) {
+    const r2 = radius * radius;
+    let cleared = 0;
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      if (p.owner !== 'enemy') continue;
+      const pp = p.sprite.position;
+      // Cylindrical check — XZ only, ignore height difference
+      const dx = pp.x - center.x, dz = pp.z - center.z;
+      if (dx * dx + dz * dz <= r2) {
+        this._remove(i);
+        cleared++;
+      }
+    }
+    this._spawnPulse(center, radius);
+    return cleared;
+  }
+
+  _spawnPulse(pos, radius) {
+    // Spawn at eye height so rings are visible in first-person view
+    const eyePos = pos.clone();
+    eyePos.y += 1.4;
+
+    const blueCol   = new THREE.Color(0x00aaff);
+    const brightCol = new THREE.Color(0xaaeeff);
+
+    // ── Large central flash ──────────────────────────────────────────────────
+    for (const [col, sz, life] of [
+      [brightCol, radius * 0.9, 0.30],   // outer glow
+      [blueCol,   radius * 0.5, 0.22],   // inner core
+    ]) {
+      const mat = new THREE.SpriteMaterial({ map: TEX.particle, transparent: true, opacity: 1, color: col });
+      const s   = new THREE.Sprite(mat);
+      s.scale.set(sz, sz, 1);
+      s.position.copy(eyePos);
+      this.scene.add(s);
+      this.particles.push({ mesh: s, velocity: new THREE.Vector3(0, 0, 0), life, maxLife: life });
+    }
+
+    // ── Particle burst — large outward sparks at multiple heights ────────────
+    for (let i = 0; i < 40; i++) {
+      const col = i % 3 === 0 ? brightCol : blueCol;
+      const mat = new THREE.SpriteMaterial({ map: TEX.particle, transparent: true, opacity: 1, color: col });
+      const s   = new THREE.Sprite(mat);
+      const sz  = 0.35 + Math.random() * 0.55;
+      s.scale.set(sz, sz, 1);
+      s.position.copy(eyePos);
+      this.scene.add(s);
+      const angle = Math.random() * Math.PI * 2;
+      const spd   = 10 + Math.random() * 14;
+      const vel   = new THREE.Vector3(
+        Math.cos(angle) * spd,
+        (Math.random() - 0.3) * 8,
+        Math.sin(angle) * spd,
+      );
+      const life = 0.5 + Math.random() * 0.4;
+      this.particles.push({ mesh: s, velocity: vel, life, maxLife: life });
+    }
+
+    // ── Three concentric rings expanding from eye level ──────────────────────
+    const ringData = [
+      { delay: 0,     duration: 0.65, maxOpacity: 1.0,  radiusMult: 1.00 },
+      { delay: 0,     duration: 0.55, maxOpacity: 0.75, radiusMult: 0.70 },
+      { delay: 0,     duration: 0.45, maxOpacity: 0.50, radiusMult: 0.40 },
+    ];
+    for (const rd of ringData) {
+      const mat = new THREE.SpriteMaterial({
+        map: TEX.ring, transparent: true, opacity: rd.maxOpacity,
+        color: blueCol, depthWrite: false,
+      });
+      const ring = new THREE.Sprite(mat);
+      ring.position.copy(eyePos);
+      ring.scale.set(0.01, 0.01, 1);
+      this.scene.add(ring);
+      this.shockwaves.push({
+        mesh: ring, t: rd.delay,
+        duration: rd.duration,
+        radius: radius * rd.radiusMult,
+        maxOpacity: rd.maxOpacity,
+      });
+    }
+  }
+
+  /**
+   * Small impact spark at a hitscan hit point.
+   * @param {THREE.Vector3} pos
+   * @param {string}  color   — weapon hitColor hex string, e.g. '#ff6622'
+   * @param {number}  damage  — effective damage dealt; drives visual scale
+   */
+  _spawnHitSpark(pos, color = '#ff4400', damage = 15) {
+    // Scale from damage: 15 dmg → scale 1.0, 120 dmg → scale ~2.2
+    const scale = 0.7 + Math.pow(damage / 20, 0.55);
+
+    const mainCol  = new THREE.Color(color);
+    const brightCol = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.6);
+
+    // Outer glow (weapon colour)
+    const matOut = new THREE.SpriteMaterial({ map: TEX.particle, transparent: true, opacity: 1, color: mainCol });
+    const outer  = new THREE.Sprite(matOut);
+    outer.scale.set(scale * 0.34, scale * 0.34, 1);
+    outer.position.copy(pos);
+    this.scene.add(outer);
+    this.particles.push({ mesh: outer, velocity: new THREE.Vector3(0, 0, 0), life: 0.12, maxLife: 0.12 });
+
+    // Inner bright core
+    const matIn = new THREE.SpriteMaterial({ map: TEX.particle, transparent: true, opacity: 1, color: brightCol });
+    const inner = new THREE.Sprite(matIn);
+    inner.scale.set(scale * 0.14, scale * 0.14, 1);
+    inner.position.copy(pos);
+    this.scene.add(inner);
+    this.particles.push({ mesh: inner, velocity: new THREE.Vector3(0, 0, 0), life: 0.07, maxLife: 0.07 });
+
+    // Tiny outward sparks — more and bigger at higher damage
+    const sparkCount = Math.round(3 + damage / 15); // 4 for shotgun pellet, ~10 for railgun
+    for (let i = 0; i < sparkCount; i++) {
+      const mat = new THREE.SpriteMaterial({ map: TEX.particle, transparent: true, opacity: 1, color: mainCol });
+      const s   = new THREE.Sprite(mat);
+      const sz  = (0.05 + Math.random() * 0.08) * scale;
+      s.scale.set(sz, sz, 1);
+      s.position.copy(pos);
+      this.scene.add(s);
+      const spd = (2 + Math.random() * 4) * scale;
+      const vel = new THREE.Vector3(
+        (Math.random() - 0.5) * spd,
+        Math.random() * spd * 0.8,
+        (Math.random() - 0.5) * spd,
+      );
+      const life = 0.10 + Math.random() * 0.10;
       this.particles.push({ mesh: s, velocity: vel, life, maxLife: life });
     }
   }
@@ -221,5 +439,10 @@ export class ProjectileSystem {
     for (let i = this.projectiles.length - 1; i >= 0; i--) this._remove(i);
     this.particles.forEach(p => { this.scene.remove(p.mesh); p.mesh.material.dispose(); });
     this.particles = [];
+    this.shockwaves.forEach(sw => {
+      this.scene.remove(sw.mesh);
+      sw.mesh.material.dispose();
+    });
+    this.shockwaves = [];
   }
 }

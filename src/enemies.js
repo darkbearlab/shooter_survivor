@@ -8,17 +8,20 @@ import { makeEnemyTexture, makeBossTexture } from './utils/PlaceholderTextures.j
 const GRAVITY_E = 22; // matches player gravity
 
 const TEXTURES = {
-  soldier:    makeEnemyTexture('soldier'),
-  rusher:     makeEnemyTexture('rusher'),
-  ranged:     makeEnemyTexture('ranged'),
-  boss:       makeBossTexture(),
-  molotov:    makeEnemyTexture('molotov'),
-  trishot:    makeEnemyTexture('trishot'),
-  sniper:     makeEnemyTexture('sniper'),
-  tank:       makeEnemyTexture('tank'),
-  guerrilla:  makeEnemyTexture('guerrilla'),
-  drone_gun:  makeEnemyTexture('drone_gun'),
-  drone_bomb: makeEnemyTexture('drone_bomb'),
+  soldier:        makeEnemyTexture('soldier'),
+  rusher:         makeEnemyTexture('rusher'),
+  ranged:         makeEnemyTexture('ranged'),
+  boss:           makeBossTexture(),
+  boss_rocketeer: makeBossTexture(),
+  boss_charger:   makeBossTexture(),
+  boss_dasher:    makeBossTexture(),
+  molotov:        makeEnemyTexture('molotov'),
+  trishot:        makeEnemyTexture('trishot'),
+  sniper:         makeEnemyTexture('sniper'),
+  tank:           makeEnemyTexture('tank'),
+  guerrilla:      makeEnemyTexture('guerrilla'),
+  drone_gun:      makeEnemyTexture('drone_gun'),
+  drone_bomb:     makeEnemyTexture('drone_bomb'),
 };
 
 export const ENEMY_DEFS = {
@@ -31,7 +34,17 @@ export const ENEMY_DEFS = {
               width: 1.0, height: 1.8, hbHalfW: 0.4, score: 120,
               projectile: true, preferDist: 10 },
   boss:     { hp: 500, speed: 3.0, damage: 25, attackRate: 1.0, attackRange: 2.2,
-              width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1000 },
+              width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1000,
+              displayName: 'THE WARDEN', isBossType: true },
+  boss_rocketeer: { hp: 600, speed: 2.8, damage: 28, attackRate: 4.5, attackRange: 28,
+                    width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1200,
+                    displayName: 'THE ROCKETEER', isBossType: true, bossRocketeer: true },
+  boss_charger:   { hp: 700, speed: 2.8, damage: 35, attackRate: 3.0, attackRange: 2.0,
+                    width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1500,
+                    displayName: 'THE CHARGER',   isBossType: true, bossCharger: true },
+  boss_dasher:    { hp: 550, speed: 22,  damage: 55, attackRate: 0,   attackRange: 0,
+                    width: 2.0, height: 2.8, hbHalfW: 0.8, score: 1300,
+                    displayName: 'THE PHANTOM',   isBossType: true, bossDasher: true },
 
   // ── New types ────────────────────────────────────────────────────────────────
   molotov:   { hp: 70,  speed: 2.5, damage: 8,  attackRate: 4.0, attackRange: 22,
@@ -106,13 +119,8 @@ export class Enemy {
     this._mat = mat;
     scene.add(this.sprite);
 
-    // HP bar
-    const bgMat = new THREE.SpriteMaterial({ color: 0x550000 });
-    this._hpBg   = new THREE.Sprite(bgMat);
-    this._hpBg.scale.set(this.def.width * 0.9, 0.09, 1);
-    scene.add(this._hpBg);
-
-    const fgMat = new THREE.SpriteMaterial({ color: 0x00dd44 });
+    // HP bar (foreground only — depthTest true so it never shows through walls)
+    const fgMat = new THREE.SpriteMaterial({ color: 0x00dd44, depthTest: true, depthWrite: false });
     this._hpFg  = new THREE.Sprite(fgMat);
     scene.add(this._hpFg);
 
@@ -149,6 +157,31 @@ export class Enemy {
       this._burstTimer = 0;
       this._diveTarget = null;
       this.pos.y       = 2 + Math.random() * 2; // spawn airborne
+    }
+
+    if (d.bossRocketeer) {
+      this.attackCooldown = 2.0 + Math.random(); // brief calm before first volley
+    }
+
+    if (d.bossCharger) {
+      this._chargeState  = 'idle';
+      this._chargeTimer  = 0;
+      this._chargeCount  = 0;
+      this._chargeDir    = new THREE.Vector3();
+      this._chargeHit    = false;
+      this._blinkTimer   = 0;
+    }
+
+    if (d.bossDasher) {
+      this._dashState    = 'pausing';
+      this._dashTimer    = 0.6 + Math.random() * 0.4;
+      this._dashCount    = 0;
+      this._dashMax      = 4 + Math.floor(Math.random() * 3); // 4–6 dashes
+      this._dashDir      = new THREE.Vector3();
+      this._dashAimTarget = null; // locked player pos when warning begins
+      this._ghostTimer   = 0;
+      this._blinkTimer   = 0;
+      this._afterimages  = [];
     }
   }
 
@@ -199,15 +232,24 @@ export class Enemy {
       this._ticGuerrilla(dt, playerPos, dist, nx, nz, onFireProjectile);
     } else if (d.drone) {
       this._ticDrone(dt, playerPos, dist, nx, nz, onFireProjectile);
+    } else if (d.bossRocketeer) {
+      this._ticBossRocketeer(dt, dist, nx, nz, onFireProjectile);
+    } else if (d.bossCharger) {
+      this._ticBossCharger(dt, dist, nx, nz, onAttackPlayer);
+    } else if (d.bossDasher) {
+      this._ticBossDasher(dt, dist, nx, nz);
     } else if (d.projectile) {
       this._ticRanged(dt, dist, nx, nz, onFireProjectile);
     } else {
       this._ticMelee(dt, dist, nx, nz, onAttackPlayer);
     }
 
-    // ── Wall steering (ground only, not leaping) ─────────────────────────────
-    const isFlying = d.drone || this._leapActive;
-    if (!isFlying && this.collision && this.velocity.lengthSq() > 0.01) {
+    // ── Wall steering (ground only, not leaping, not mid-charge) ─────────────
+    const isFlying     = d.drone || this._leapActive;
+    const skipSteering = isFlying
+      || (d.bossCharger && this._chargeState === 'charge')
+      || (d.bossDasher  && this._dashState   === 'dashing');
+    if (!skipSteering && this.collision && this.velocity.lengthSq() > 0.01) {
       this._steerCooldown -= dt;
       if (this._steerCooldown <= 0) {
         this._steerCooldown = 0.12;
@@ -535,6 +577,229 @@ export class Enemy {
           this.onSpecialAttack(this, { type: 'kamikaze', pos: this.pos.clone() });
         }
       }
+
+      // Missed — XZ distance to dive target is small but no hit triggered.
+      // Reset to approach so the drone doesn't get stuck.
+      const xzDist = Math.sqrt(dX * dX + dZ * dZ);
+      if (xzDist < 1.0) {
+        this._droneState = 'approach';
+        this._droneTimer = 1.5 + Math.random();
+        this._diveTarget = null;
+      }
+    }
+  }
+
+  _ticBossRocketeer(dt, dist, nx, nz, onFireProjectile) {
+    // Keeps a medium distance and periodically fires a spread of 5 rockets
+    const pref = 12;
+    if (dist > pref + 3) {
+      this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+    } else if (dist < pref - 3) {
+      this.velocity.set(-nx * this.def.speed * 0.6, 0, -nz * this.def.speed * 0.6);
+    } else {
+      this._strafeTimer -= dt;
+      if (this._strafeTimer <= 0) {
+        this._strafeSign  = -this._strafeSign;
+        this._strafeTimer = 1.5 + Math.random();
+      }
+      this.velocity.set(
+        -nz * this._strafeSign * this.def.speed * 0.45, 0,
+         nx * this._strafeSign * this.def.speed * 0.45,
+      );
+    }
+
+    if (this.attackCooldown <= 0 && dist < this.def.attackRange) {
+      this.attackCooldown = this.def.attackRate;
+      if (onFireProjectile) onFireProjectile(this, { type: 'boss_rocket' });
+    }
+  }
+
+  _ticBossCharger(dt, dist, nx, nz, onAttackPlayer) {
+    const MAX_CHARGES = 2;
+    const CHARGE_SPEED = 18;
+
+    if (this._chargeState === 'idle') {
+      // Approach player until ready to charge
+      this.velocity.set(nx * this.def.speed, 0, nz * this.def.speed);
+      if (this.attackCooldown <= 0) {
+        this._chargeState = 'windup';
+        this._chargeTimer = 1.5;
+        this._blinkTimer  = 0;
+        this._chargeDir.set(nx, 0, nz);
+        this.velocity.set(0, 0, 0);
+      }
+
+    } else if (this._chargeState === 'windup') {
+      this.velocity.set(0, 0, 0);
+      this._chargeTimer -= dt;
+      this._blinkTimer  -= dt;
+      // Keep updating charge direction toward player until commit
+      this._chargeDir.set(nx, 0, nz);
+      // Amber / white blink to warn player
+      if (this._blinkTimer <= 0) {
+        this._blinkTimer = 0.08;
+        this._mat.color.setHex(
+          this._mat.color.getHex() === 0xff8800 ? 0xffffff : 0xff8800,
+        );
+      }
+      if (this._chargeTimer <= 0) {
+        this._mat.color.setHex(0xff2200);
+        this._chargeState = 'charge';
+        this._chargeTimer = 1.2;
+        this._chargeHit   = false;
+      }
+
+    } else if (this._chargeState === 'charge') {
+      this._chargeTimer -= dt;
+      this.velocity.set(
+        this._chargeDir.x * CHARGE_SPEED, 0,
+        this._chargeDir.z * CHARGE_SPEED,
+      );
+      // Single contact hit during this charge
+      if (!this._chargeHit && dist < this.def.attackRange + 0.5) {
+        this._chargeHit = true;
+        onAttackPlayer(this.def.damage * 2);
+        this.applyKnockback(-nx, -nz, 12);
+      }
+      if (this._chargeTimer <= 0) {
+        this._chargeCount++;
+        const longRest = this._chargeCount >= MAX_CHARGES;
+        this._chargeTimer = longRest ? 5.0 : 2.0;
+        this._chargeState = 'rest';
+        if (longRest) this._chargeCount = 0;
+        this._mat.color.setHex(0xffffff);
+        this.velocity.set(0, 0, 0);
+      }
+
+    } else if (this._chargeState === 'rest') {
+      this.velocity.set(0, 0, 0);
+      this._chargeTimer -= dt;
+      if (this._chargeTimer <= 0) {
+        if (this._chargeCount === 0) {
+          // After long rest — back to idle approach
+          this._chargeState   = 'idle';
+          this.attackCooldown = this.def.attackRate;
+        } else {
+          // After short rest — another charge cycle
+          this._chargeState = 'windup';
+          this._chargeTimer = 1.5;
+          this._blinkTimer  = 0;
+          this._chargeDir.set(nx, 0, nz);
+        }
+      }
+    }
+  }
+
+  _ticBossDasher(dt, dist, nx, nz) {
+    this._updateAfterimages(dt);
+
+    if (this._dashState === 'dashing') {
+      this.velocity.set(
+        this._dashDir.x * this.def.speed, 0,
+        this._dashDir.z * this.def.speed,
+      );
+      // Spawn afterimage trail
+      this._ghostTimer -= dt;
+      if (this._ghostTimer <= 0) {
+        this._ghostTimer = 0.045;
+        this._spawnAfterimage();
+      }
+      this._dashTimer -= dt;
+      if (this._dashTimer <= 0) {
+        this._dashCount++;
+        if (this._dashCount >= this._dashMax) {
+          // Enough dashes — lock target NOW, then telegraph with warning flash
+          this._dashAimTarget = new THREE.Vector3(
+            this.pos.x + nx * 50, 0, this.pos.z + nz * 50,
+          );
+          this._dashState  = 'warning';
+          this._dashTimer  = 0.7;   // how long the warning flash lasts
+          this._blinkTimer = 0;
+          this.velocity.set(0, 0, 0);
+        } else {
+          // Brief pause before next dash
+          this._dashState = 'pausing';
+          this._dashTimer = 0.10 + Math.random() * 0.06;
+          this.velocity.set(0, 0, 0);
+        }
+      }
+
+    } else if (this._dashState === 'pausing') {
+      this.velocity.set(0, 0, 0);
+      this._dashTimer -= dt;
+      if (this._dashTimer <= 0) {
+        // Alternate sides with slight forward lean
+        this._strafeSign = -this._strafeSign;
+        this._dashDir.set(-nz * this._strafeSign, 0, nx * this._strafeSign);
+        this._dashDir.addScaledVector(new THREE.Vector3(nx, 0, nz), 0.15);
+        this._dashDir.normalize();
+        this._dashState  = 'dashing';
+        this._dashTimer  = 0.65 + Math.random() * 0.25; // longer dash duration
+        this._ghostTimer = 0;
+      }
+
+    } else if (this._dashState === 'warning') {
+      // Bright orange-white blink — player has time to react
+      this.velocity.set(0, 0, 0);
+      this._dashTimer  -= dt;
+      this._blinkTimer -= dt;
+      if (this._blinkTimer <= 0) {
+        this._blinkTimer = 0.07;
+        this._mat.color.setHex(
+          this._mat.color.getHex() === 0xff6600 ? 0xffffff : 0xff6600,
+        );
+      }
+      if (this._dashTimer <= 0) {
+        this._dashState  = 'shooting';
+        this._dashTimer  = 0.15;  // tiny settle before firing
+        this._blinkTimer = 0;
+        this._mat.color.setHex(0xffffff);
+      }
+
+    } else if (this._dashState === 'shooting') {
+      this.velocity.set(0, 0, 0);
+      this._dashTimer -= dt;
+      if (this._dashTimer <= 0) {
+        if (this.onSpecialAttack) {
+          this.onSpecialAttack(this, {
+            type:      'boss_railgun',
+            from:      new THREE.Vector3(this.pos.x, this.pos.y + this.hbH * 0.7, this.pos.z),
+            aimTarget: this._dashAimTarget.clone(),
+          });
+        }
+        // Reset dash cycle
+        this._dashState  = 'pausing';
+        this._dashTimer  = 0.25;
+        this._dashCount  = 0;
+        this._dashMax    = 4 + Math.floor(Math.random() * 3);
+      }
+    }
+  }
+
+  _spawnAfterimage() {
+    const mat = new THREE.SpriteMaterial({
+      map:         TEXTURES[this.type],
+      transparent: true,
+      opacity:     0.55,
+      color:       new THREE.Color(0x22aaff),
+    });
+    const s = new THREE.Sprite(mat);
+    s.scale.set(this.def.width, this.def.height, 1);
+    s.position.copy(this.sprite.position);
+    this.scene.add(s);
+    this._afterimages.push({ sprite: s, life: 0.22, maxLife: 0.22 });
+  }
+
+  _updateAfterimages(dt) {
+    for (let i = this._afterimages.length - 1; i >= 0; i--) {
+      const g = this._afterimages[i];
+      g.life -= dt;
+      g.sprite.material.opacity = Math.max(0, (g.life / g.maxLife) * 0.55);
+      if (g.life <= 0) {
+        this.scene.remove(g.sprite);
+        g.sprite.material.dispose();
+        this._afterimages.splice(i, 1);
+      }
     }
   }
 
@@ -553,7 +818,6 @@ export class Enemy {
   die() {
     this.alive = false;
     this.scene.remove(this.sprite);
-    this.scene.remove(this._hpBg);
     this.scene.remove(this._hpFg);
     if (this._laserLine) {
       this.scene.remove(this._laserLine);
@@ -561,8 +825,14 @@ export class Enemy {
       this._laserLine.material.dispose();
       this._laserLine = null;
     }
+    if (this._afterimages) {
+      for (const g of this._afterimages) {
+        this.scene.remove(g.sprite);
+        g.sprite.material.dispose();
+      }
+      this._afterimages = [];
+    }
     this._mat.dispose();
-    this._hpBg.material.dispose();
     this._hpFg.material.dispose();
     if (this.onDeath) this.onDeath(this.pos.clone(), this.type);
   }
@@ -577,10 +847,9 @@ export class Enemy {
     const cy = this.pos.y + this.hbH / 2;
     this.sprite.position.set(this.pos.x, cy, this.pos.z);
 
-    const barY  = this.pos.y + this.hbH + 0.2;
-    const pct   = Math.max(0, this.hp / this.maxHp);
-    const barW  = this.def.width * 0.9;
-    this._hpBg.position.set(this.pos.x, barY, this.pos.z);
+    const barY = this.pos.y + this.hbH + 0.2;
+    const pct  = Math.max(0, this.hp / this.maxHp);
+    const barW = this.def.width * 0.9;
     this._hpFg.scale.set(barW * pct, 0.09, 1);
     this._hpFg.position.set(this.pos.x - barW * (1 - pct) / 2, barY, this.pos.z);
   }
@@ -598,20 +867,33 @@ export class WaveManager {
     this.wave        = 0;
     this._queue      = [];
     this._spawnTimer = 0;
-    this.SPAWN_INTERVAL = 0.7;
-    this.onEnemyDeath   = null; // fn(pos, type)
+    this.SPAWN_INTERVAL  = 0.7;
+    this.onEnemyDeath    = null; // fn(pos, type)
     this.onSpecialAttack = null; // fn(enemy, data)
+    this._bossPool       = ['boss_rocketeer', 'boss_charger', 'boss_dasher'];
+    this._bossUsed       = new Set();
+    this.pendingBossType = null;
+  }
+
+  _pickBossType() {
+    if (this._bossUsed.size >= this._bossPool.length) this._bossUsed.clear();
+    const available = this._bossPool.filter(t => !this._bossUsed.has(t));
+    const chosen    = available[Math.floor(Math.random() * available.length)];
+    this._bossUsed.add(chosen);
+    return chosen;
   }
 
   startWave() {
     this.wave++;
-    this._queue = this._buildQueue(this.wave);
+    const isBossWave = this.wave % 5 === 0;
+    this.pendingBossType = isBossWave ? this._pickBossType() : null;
+    this._queue      = this._buildQueue(this.wave);
     this._spawnTimer = 0;
   }
 
   _buildQueue(wave) {
     if (wave % 5 === 0) {
-      const q = ['boss'];
+      const q = [this.pendingBossType ?? 'boss'];
       const escorts = ['soldier','molotov','trishot','ranged','drone_gun','drone_bomb','guerrilla'];
       for (let i = 0; i < wave; i++) q.push(escorts[i % escorts.length]);
       return q;
@@ -640,6 +922,12 @@ export class WaveManager {
         const sp   = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
         const jitter = () => (Math.random() - 0.5) * 4;
         const e = new Enemy(type, sp.x + jitter(), sp.z + jitter(), this.scene, this.collision);
+        // Scale boss HP with wave number
+        if (e.def.isBossType) {
+          const bossWaveN = Math.floor(this.wave / 5); // 1 at wave5, 2 at wave10…
+          const mult = bossWaveN * 0.6 + 0.4;         // 1.0× at wave5, 1.6× at wave10…
+          e.hp = e.maxHp = Math.round(e.def.hp * mult);
+        }
         if (this.onEnemyDeath)    e.onDeath         = this.onEnemyDeath;
         if (this.onSpecialAttack) e.onSpecialAttack = this.onSpecialAttack;
         this.enemies.push(e);

@@ -83,6 +83,58 @@
     }
     #start-btn:hover { background: #ff8833; }
 
+    /* ── Loadout Select ── */
+    #loadout-select { z-index: 200; flex-direction: column; padding: 24px 32px; overflow-y: auto; }
+    #lo-header { width: 100%; display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    #lo-header h1 { font-size: 28px; letter-spacing: 8px; color: #44ccff; text-shadow: 0 0 16px #44ccff88; margin: 0; }
+    #lo-budget-row { display: flex; align-items: center; gap: 10px; }
+    #lo-budget-label { font-size: 11px; letter-spacing: 3px; color: #888; }
+    #lo-budget-bar { width: 120px; height: 8px; background: #222; border: 1px solid #444; border-radius: 4px; overflow: hidden; }
+    #lo-budget-fill { height: 100%; transition: width 0.2s, background 0.2s; }
+    #lo-budget-num { font-size: 14px; color: #e8d090; min-width: 40px; text-align: right; letter-spacing: 1px; }
+    #lo-body { display: flex; gap: 24px; width: 100%; flex: 1; min-height: 0; }
+    .lo-col { display: flex; flex-direction: column; min-width: 180px; }
+    .lo-col-wide { flex: 1; }
+    .lo-col-title { font-size: 11px; letter-spacing: 4px; color: #888; margin-bottom: 12px; border-bottom: 1px solid #333; padding-bottom: 6px; }
+    .lo-col-sub { color: #555; font-size: 10px; }
+    #lo-weapon-list, #lo-active-list { display: flex; flex-direction: column; gap: 6px; }
+    #lo-passive-grid { display: flex; gap: 16px; flex: 1; }
+    #lo-passive-grid > div { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .lo-passive-sub { font-size: 10px; letter-spacing: 2px; color: #666; margin-bottom: 4px; }
+    .lo-cost-pos { color: #44cc88; }
+    .lo-cost-neg { color: #ff6655; }
+    #lo-buffs, #lo-nerfs { display: flex; flex-direction: column; gap: 6px; }
+
+    .lo-card {
+      display: flex; align-items: center; gap: 10px;
+      border: 1px solid #333; padding: 8px 10px;
+      cursor: pointer; background: rgba(255,255,255,0.02);
+      transition: border-color 0.12s, background 0.12s;
+      user-select: none;
+    }
+    .lo-card:hover:not(.lo-blocked) { border-color: #44ccff88; background: rgba(68,204,255,0.06); }
+    .lo-card.lo-selected { border-color: #44ccff; background: rgba(68,204,255,0.14); }
+    .lo-card.lo-auto { border-color: #44cc88; background: rgba(68,204,128,0.08); cursor: default; }
+    .lo-card.lo-blocked { opacity: 0.3; cursor: not-allowed; }
+    .lo-card-icon { font-size: 18px; min-width: 24px; text-align: center; }
+    .lo-card-body { flex: 1; min-width: 0; }
+    .lo-card-name { font-size: 12px; color: #e8d090; letter-spacing: 1px; }
+    .lo-card-sub { font-size: 10px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lo-card-cost { font-size: 13px; font-weight: bold; min-width: 20px; text-align: right; }
+
+    #lo-footer { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 20px; border-top: 1px solid #333; padding-top: 16px; }
+    #lo-status { font-size: 12px; letter-spacing: 2px; }
+    #lo-back-btn, #lo-confirm-btn {
+      padding: 10px 28px; background: transparent;
+      font-family: 'Courier New', monospace; font-size: 13px; letter-spacing: 3px;
+      cursor: pointer; transition: background 0.15s;
+    }
+    #lo-back-btn    { color: #888; border: 1px solid #444; }
+    #lo-back-btn:hover { background: #222; color: #ccc; }
+    #lo-confirm-btn { color: #44ccff; border: 2px solid #44ccff; font-weight: bold; }
+    #lo-confirm-btn:hover:not(:disabled) { background: rgba(68,204,255,0.15); }
+    #lo-confirm-btn:disabled { color: #335566; border-color: #335566; cursor: not-allowed; }
+
     /* Map Select */
     #map-cards {
       display: flex; gap: 32px; margin-bottom: 40px;
@@ -117,6 +169,59 @@
     #map-select-btns button:hover { background: #333; color: #fff; }
     #map-start-btn { background: #ff6600 !important; color: #000 !important; border-color: #ff6600 !important; font-weight: bold; }
     #map-start-btn:hover { background: #ff8833 !important; }
+
+    /* ── Boss Bar ── */
+    #boss-bar-wrap {
+      position: fixed;
+      top: 72px;
+      left: 12%;
+      right: 12%;
+      z-index: 30;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      opacity: 0;
+    }
+    #boss-bar-name {
+      font-size: 11px;
+      letter-spacing: 8px;
+      color: #e8c060;
+      text-transform: uppercase;
+      text-shadow: 0 0 12px #ff440066;
+    }
+    /* Decorative end-cap markers via pseudo-elements */
+    #boss-bar-outer {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #boss-bar-outer::before,
+    #boss-bar-outer::after {
+      content: '';
+      display: block;
+      width: 6px; height: 6px;
+      border: 1px solid #88662244;
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+    #boss-bar-track {
+      flex: 1;
+      height: 7px;
+      background: rgba(255,255,255,0.04);
+      border-top: 1px solid #55330088;
+      border-bottom: 1px solid #55330088;
+      overflow: hidden;
+      transform: scaleX(0);
+      transform-origin: center;
+    }
+    #boss-bar-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, #880000, #cc2200);
+    }
 
     /* HUD */
     #hud {
@@ -175,6 +280,36 @@
     }
     #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
     #crosshair::after  { height: 2px; width: 100%; top: 50%; transform: translateY(-50%); }
+
+    #ammo-ring {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 64px; height: 64px;
+      pointer-events: none;
+      overflow: visible;
+    }
+    #ammo-ring-track {
+      fill: none;
+      stroke: rgba(255,255,255,0.12);
+      stroke-width: 2.5;
+    }
+    #ammo-ring-fill {
+      fill: none;
+      stroke: rgba(200,200,200,0.75);
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      /* starts at top (12 o'clock): rotate -90deg around centre */
+      transform-origin: 32px 32px;
+      transform: rotate(-90deg);
+      transition: stroke-dashoffset 0.06s linear, stroke 0.15s ease;
+    }
+    @keyframes ammo-ring-blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.2; }
+    }
+    #ammo-ring.empty  #ammo-ring-fill { animation: ammo-ring-blink 0.4s infinite; stroke: #ff4444; }
+    #ammo-ring.reload #ammo-ring-fill { stroke: #ff8800; transition: stroke-dashoffset 0.05s linear; }
+    #ammo-ring.hidden-ring { opacity: 0; }
 
     #hit-marker {
       position: fixed; top: 50%; left: 50%;
@@ -319,10 +454,10 @@
       color: #666;
       margin-bottom: 64px;
     }
-    #title-start-btn {
-      padding: 16px 56px;
+    #title-btn-row { display: flex; gap: 20px; }
+    #title-start-btn, #title-loadout-btn {
+      padding: 16px 48px;
       background: transparent;
-      color: #ff6600;
       border: 2px solid #ff6600;
       font-size: 18px;
       font-family: 'Courier New', monospace;
@@ -331,12 +466,17 @@
       cursor: pointer;
       text-transform: uppercase;
       transition: background 0.15s, box-shadow 0.15s;
+    }
+    #title-start-btn {
+      color: #ff6600;
       animation: titlePulse 2s ease-in-out infinite;
     }
-    #title-start-btn:hover {
-      background: rgba(255,102,0,0.15);
-      box-shadow: 0 0 24px rgba(255,102,0,0.5);
+    #title-start-btn:hover  { background: rgba(255,102,0,0.15); box-shadow: 0 0 24px rgba(255,102,0,0.5); }
+    #title-loadout-btn {
+      color: #44ccff;
+      border-color: #44ccff;
     }
+    #title-loadout-btn:hover { background: rgba(68,204,255,0.12); box-shadow: 0 0 20px rgba(68,204,255,0.4); }
     @keyframes titlePulse {
       0%, 100% { box-shadow: 0 0 8px rgba(255,102,0,0.3); }
       50%       { box-shadow: 0 0 22px rgba(255,102,0,0.7); }
@@ -507,6 +647,19 @@
 
     /* Weapon slots strip — replaces old weapon/ammo boxes */
     #hud-bottom { display: none; } /* hidden: replaced by #weapon-slots */
+
+    #respawn-btn {
+      position: absolute;
+      bottom: 24px; left: 50%; transform: translateX(-50%);
+      padding: 5px 14px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,120,50,0.7);
+      color: rgba(255,150,80,0.9);
+      font-family: inherit; font-size: 11px; letter-spacing: 2px;
+      cursor: pointer; pointer-events: all;
+      display: none;
+    }
+    #respawn-btn:hover { background: rgba(255,100,30,0.25); }
     #weapon-slots {
       position: absolute;
       bottom: 24px;
@@ -615,7 +768,10 @@
 <div id="title-screen">
   <div id="title-logo">SHOOTER<br>SURVIVOR</div>
   <div id="title-sub">WAVE-BASED ARENA COMBAT</div>
-  <button id="title-start-btn">PRESS START</button>
+  <div id="title-btn-row">
+    <button id="title-start-btn">CLASSIC</button>
+    <button id="title-loadout-btn">LOADOUT</button>
+  </div>
   <div id="title-keybinds">
     <span><strong>WASD</strong> Move</span>
     <span><strong>MOUSE</strong> Aim</span>
@@ -645,6 +801,11 @@
 </div>
 
 <!-- Map Select Screen -->
+<!-- Loadout Select Screen -->
+<div id="loadout-select" class="screen hidden">
+  <!-- Content injected dynamically by LoadoutSelect.js -->
+</div>
+
 <div id="map-select" class="screen hidden">
   <h1>SHOOTER SURVIVOR</h1>
   <h2>SELECT MAP</h2>
@@ -681,6 +842,16 @@
   <button id="restart-btn">PLAY AGAIN</button>
 </div>
 
+<!-- Boss Health Bar -->
+<div id="boss-bar-wrap">
+  <div id="boss-bar-name">BOSS</div>
+  <div id="boss-bar-outer">
+    <div id="boss-bar-track">
+      <div id="boss-bar-fill"></div>
+    </div>
+  </div>
+</div>
+
 <!-- HUD -->
 <div id="hud" class="hidden">
   <div id="hud-top">
@@ -696,6 +867,8 @@
     <div id="skill-cd-bg"><div id="skill-cd-fill" style="width:100%"></div></div>
     <div id="skill-cd-text">READY</div>
   </div>
+
+  <button id="respawn-btn">RETURN TO ARENA</button>
 
   <div id="hud-bars">
     <div class="bar-row">
@@ -728,6 +901,10 @@
 </div>
 
 <div id="crosshair"></div>
+<svg id="ammo-ring" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <circle id="ammo-ring-track" cx="32" cy="32" r="26"/>
+  <circle id="ammo-ring-fill"  cx="32" cy="32" r="26"/>
+</svg>
 <div id="hit-marker"></div>
 <div id="damage-vignette"></div>
 <div id="wave-announce"></div>
